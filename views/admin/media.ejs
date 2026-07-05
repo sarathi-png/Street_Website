@@ -1,0 +1,118 @@
+<%- include('../partials/header') %>
+  <div class="admin-page">
+    <div class="admin-header">
+      <div>
+        <h1 class="page-title">Manage Media</h1>
+        <p class="page-subtitle"><i class="fas fa-upload"></i> Upload files or import from Google Drive</p>
+      </div>
+    </div>
+
+    <div class="upload-section">
+      <h2 class="section-title"><i class="fas fa-cloud-upload-alt"></i> Upload File</h2>
+      <form method="POST" action="/admin/media/upload" enctype="multipart/form-data" class="upload-form" id="uploadForm">
+        <div class="form-group"><label for="file"><i class="fas fa-file"></i> File</label><input type="file" id="file" name="file" required class="form-file"><span style="font-size:0.8rem;color:var(--clr-text-muted);margin-top:4px;display:block">JPEG, PNG, WebP, GIF, MP4, WebM — max <%= process.env.UPLOAD_MAX_SIZE || 100 %>MB</span></div>
+        <div class="form-group"><label for="title"><i class="fas fa-heading"></i> Title</label><input type="text" id="title" name="title" placeholder="Leave blank to use filename"></div>
+        <div class="form-group"><label for="description"><i class="fas fa-align-left"></i> Description</label><textarea id="description" name="description" rows="2" placeholder="Optional description" class="form-textarea"></textarea></div>
+        <div class="form-group"><label for="tags"><i class="fas fa-tags"></i> Tags</label><input type="text" id="tags" name="tags" placeholder="Comma-separated: nature, sunset, street"></div>
+        <div class="form-group"><label for="category_id"><i class="fas fa-tag"></i> Category</label>
+          <select id="category_id" name="category_id"><option value="">No category</option>
+            <% (typeof categories !== 'undefined' ? categories : []).forEach(function(cat) { %><option value="<%= cat.id %>"><%= cat.name %></option><% }) %>
+          </select>
+        </div>
+        <button type="submit" class="btn btn-primary" id="uploadBtn"><i class="fas fa-cloud-upload-alt"></i> Upload</button>
+        <div id="uploadProgress" class="hidden" style="margin-top:12px">
+          <div class="progress-bar-upload"><div class="progress-fill-upload" id="uploadProgressBar"></div></div>
+          <span id="uploadProgressText" style="font-size:0.8rem;color:var(--clr-text-muted)"></span>
+        </div>
+      </form>
+    </div>
+
+    <div class="upload-section">
+      <h2 class="section-title"><i class="fab fa-google-drive"></i> Import from Google Drive</h2>
+      <p style="font-size:0.85rem;color:var(--clr-text-muted);margin-bottom:16px">Paste a Drive file link or folder link. Your API key is already configured.</p>
+      <form id="driveImportForm" method="POST" action="/admin/media/import-drive" class="upload-form">
+        <div class="form-group"><label for="drive_url"><i class="fas fa-link"></i> Google Drive URL</label><input type="url" id="drive_url" name="drive_url" placeholder="https://drive.google.com/file/d/... or /drive/folders/..." required></div>
+        <div class="form-group"><label for="drive_title"><i class="fas fa-heading"></i> Title prefix</label><input type="text" id="drive_title" name="title" placeholder="Optional — prefixed to imported filenames"></div>
+        <div class="form-group"><label for="drive_category_id"><i class="fas fa-tag"></i> Category</label>
+          <select id="drive_category_id" name="category_id"><option value="">No category</option>
+            <% (typeof categories !== 'undefined' ? categories : []).forEach(function(cat) { %><option value="<%= cat.id %>"><%= cat.name %></option><% }) %>
+          </select>
+        </div>
+        <button type="submit" class="btn btn-primary" id="driveImportBtn"><i class="fab fa-google-drive"></i> Import from Drive</button>
+      </form>
+      <div id="driveProgress" class="hidden" style="margin-top:16px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <span id="driveProgressLabel" style="font-size:0.9rem;font-weight:600"><i class="fas fa-sync-alt fa-spin"></i> Importing...</span>
+          <span id="driveProgressCount" style="font-size:0.8rem;color:var(--clr-text-muted)">0 / 0</span>
+        </div>
+        <div class="progress-bar-upload"><div class="progress-fill-upload" id="driveProgressBar"></div></div>
+        <div id="driveProgressError" style="font-size:0.8rem;color:var(--clr-text-muted);margin-top:6px"></div>
+      </div>
+    </div>
+
+    <div class="admin-header" style="margin-top:8px">
+      <h2 class="section-title" style="margin:0"><i class="fas fa-list"></i> All Media</h2>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <form method="POST" action="/admin/media/bulk-move" id="bulkForm" style="display:none;align-items:center;gap:8px">
+          <span id="bulkCount">0 selected</span>
+          <select name="category_id" id="bulkCategorySelect"><option value="">Move to category...</option>
+            <% (typeof categories !== 'undefined' ? categories : []).forEach(function(cat) { %><option value="<%= cat.id %>"><%= cat.name %></option><% }) %>
+          </select>
+          <button type="submit" class="btn btn-sm btn-secondary">Move</button>
+          <button type="button" class="btn btn-sm btn-danger" id="bulkDeleteBtn"><i class="fas fa-trash"></i> Delete</button>
+          <button type="button" class="btn btn-sm btn-secondary" id="bulkClearBtn">Clear</button>
+        </form>
+      </div>
+    </div>
+    <div class="admin-table-wrapper">
+      <table class="admin-table">
+        <thead><tr><th style="width:32px"><input type="checkbox" id="selectAll" title="Select all"></th><th>Preview</th><th>Title</th><th>Type</th><th>Tags</th><th>Category</th><th>Uploaded By</th><th>Views</th><th>Date</th><th>Actions</th></tr></thead>
+        <tbody>
+          <% (typeof media !== 'undefined' ? media : []).forEach(function(item) { %>
+            <tr>
+              <td><input type="checkbox" class="bulk-check" value="<%= item.id %>"></td>
+              <td><% if (item.thumbnail) { %><img src="/thumbnails/<%= item.thumbnail %>" alt="" class="table-thumb"><% } else { %><span class="table-thumb-placeholder"><i class="fas fa-<%= item.type === 'video' ? 'video' : 'image' %>"></i></span><% } %></td>
+              <td>
+                <strong><%= item.title %></strong>
+                <% if (item.drive_file_id) { %><span class="media-tag" style="font-size:0.65rem;padding:2px 6px;background:var(--clr-primary-light);color:var(--clr-primary)"><i class="fab fa-google-drive"></i></span><% } %>
+                <% if (item.description) { %><br><span style="font-size:0.75rem;color:var(--clr-text-muted)"><%= item.description.length > 40 ? item.description.slice(0, 40) + '...' : item.description %></span><% } %>
+              </td>
+              <td><span class="media-type-badge"><i class="fas fa-<%= item.type === 'video' ? 'video' : 'camera' %>"></i> <%= item.type %></span></td>
+              <td>
+                <% var itemTags = (typeof tagsMap !== 'undefined' && tagsMap[item.id]) ? tagsMap[item.id] : []; %>
+                <% if (itemTags.length) { %><% itemTags.slice(0,2).forEach(function(t) { %><span class="media-tag media-tag-tag" style="font-size:0.65rem"><%= t %></span><% }) %><% if (itemTags.length > 2) { %><span style="font-size:0.65rem;color:var(--clr-text-muted)">+<%= itemTags.length - 2 %></span><% } %><% } else { %><span style="color:var(--clr-text-muted)">—</span><% } %>
+              </td>
+              <td><%= item.category_name || '—' %></td>
+              <td><%= item.uploader_name %></td>
+              <td><%= item.views || 0 %></td>
+              <td><%= new Date(item.created_at).toLocaleDateString('en-IN') %></td>
+              <td class="action-cell">
+                <button class="btn btn-sm btn-secondary btn-edit" data-id="<%= item.id %>" data-title="<%= item.title %>" data-category="<%= item.category_id || '' %>" data-description="<%= (item.description || '').replace(/"/g, '&quot;') %>" data-tags="<%= (typeof tagsMap !== 'undefined' && tagsMap[item.id] ? tagsMap[item.id].join(', ') : '').replace(/"/g, '&quot;') %>"><i class="fas fa-edit"></i></button>
+                <form method="POST" action="/admin/media/delete/<%= item.id %>" class="inline-form" onsubmit="return confirm('Delete this media permanently?')"><button type="submit" class="btn btn-sm btn-danger"><i class="fas fa-trash"></i></button></form>
+              </td>
+            </tr>
+          <% }) %>
+          <% if (!media || media.length === 0) { %><tr><td colspan="10" class="text-center">No media yet</td></tr><% } %>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="editModal" class="modal hidden">
+    <div class="modal-overlay" id="modalOverlay"></div>
+    <div class="modal-content">
+      <h2><i class="fas fa-edit"></i> Edit Media</h2>
+      <form id="editForm" method="POST" class="modal-form">
+        <div class="form-group"><label for="edit_title">Title</label><input type="text" id="edit_title" name="title" required></div>
+        <div class="form-group"><label for="edit_description">Description</label><textarea id="edit_description" name="description" rows="3" class="form-textarea"></textarea></div>
+        <div class="form-group"><label for="edit_tags">Tags</label><input type="text" id="edit_tags" name="tags" placeholder="Comma-separated tags"></div>
+        <div class="form-group"><label for="edit_category_id">Category</label>
+          <select id="edit_category_id" name="category_id"><option value="">No category</option>
+            <% (typeof categories !== 'undefined' ? categories : []).forEach(function(cat) { %><option value="<%= cat.id %>"><%= cat.name %></option><% }) %>
+          </select>
+        </div>
+        <div class="modal-actions"><button type="button" class="btn btn-secondary" id="modalCancel"><i class="fas fa-times"></i> Cancel</button><button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Save</button></div>
+      </form>
+    </div>
+  </div>
+<%- include('../partials/footer') %>

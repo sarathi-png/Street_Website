@@ -1,0 +1,110 @@
+<%- include('../partials/header') %>
+  <div class="media-view">
+    <div class="media-view-nav">
+      <a href="/" class="btn btn-secondary btn-sm"><i class="fas fa-arrow-left"></i> Gallery</a>
+      <% if (typeof prev !== 'undefined' && prev || typeof next !== 'undefined' && next) { %>
+        <div class="media-view-nav-between">
+          <% if (typeof prev !== 'undefined' && prev) { %>
+            <a href="/media/<%= prev.id %>" class="btn btn-sm"><i class="fas fa-chevron-left"></i></a>
+          <% } %>
+          <% if (typeof next !== 'undefined' && next) { %>
+            <a href="/media/<%= next.id %>" class="btn btn-sm"><i class="fas fa-chevron-right"></i></a>
+          <% } %>
+        </div>
+      <% } %>
+    </div>
+
+    <div class="media-view-content">
+      <% if (item.type === 'photo') { %>
+        <div class="media-view-img-wrapper">
+          <img src="/uploads/<%= item.filename %>" alt="<%= item.title %>" class="media-view-img" id="lightboxTrigger" data-id="<%= item.id %>" data-filename="<%= item.filename %>">
+        </div>
+      <% } else { %>
+        <div class="media-view-video-wrapper">
+          <video controls preload="metadata" class="media-view-video" id="videoPlayer" data-media-id="<%= item.id %>"
+            <% if (typeof watchPosition !== 'undefined' && watchPosition && watchPosition.position_seconds > 0) { %>data-resume="<%= watchPosition.position_seconds %>"<% } %>>
+            <source src="/stream/<%= item.id %>" type="<%= item.mime_type || 'video/mp4' %>">
+            Your browser doesn't support this video format.
+          </video>
+          <% if (typeof watchPosition !== 'undefined' && watchPosition && watchPosition.position_seconds > 0) { %>
+            <div class="resume-notice" id="resumeNotice">
+              <span>Resume from <%= Math.floor(watchPosition.position_seconds / 60) %>m <%= Math.floor(watchPosition.position_seconds % 60) %>s</span>
+              <button class="btn btn-sm btn-primary" onclick="document.getElementById('videoPlayer').currentTime=<%= watchPosition.position_seconds %>;document.getElementById('resumeNotice').classList.add('hidden')">Resume</button>
+              <button class="btn btn-sm btn-secondary" onclick="document.getElementById('resumeNotice').classList.add('hidden')">Start over</button>
+            </div>
+          <% } %>
+        </div>
+      <% } %>
+    </div>
+
+    <div class="media-view-details">
+      <h1 class="media-view-title"><%= item.title %></h1>
+      <% if (item.description) { %>
+        <p class="media-view-description"><%= item.description %></p>
+      <% } %>
+      <% if (typeof tags !== 'undefined' && tags && tags.length) { %>
+        <div class="media-view-tags">
+          <% tags.forEach(function(t) { %><span class="media-tag media-tag-tag"><%= t %></span><% }) %>
+        </div>
+      <% } %>
+      <div class="media-view-meta">
+        <% if (item.category_name) { %><span class="media-tag"><%= item.category_name %></span><% } %>
+        <span><i class="fas fa-<%= item.type === 'video' ? 'video' : 'camera' %>"></i> <%= item.type %></span>
+        <span><i class="fas fa-user"></i> <%= item.uploader_name %></span>
+        <span><i class="fas fa-eye"></i> <%= item.views || 0 %> views</span>
+        <span><i class="fas fa-download"></i> <%= item.downloads %> downloads</span>
+        <span><i class="fas fa-heart" id="likeCount"></i> <span id="likeCountNum"><%= item.likes || 0 %></span></span>
+        <% if (item.drive_file_id) { %><span class="media-tag" style="background:var(--clr-primary-light);color:var(--clr-primary)"><i class="fab fa-google-drive"></i> Drive</span><% } %>
+        <% if (item.file_size) { %><span><i class="fas fa-database"></i> <%= (item.file_size / 1024 / 1024).toFixed(1) %> MB</span><% } %>
+        <span><i class="fas fa-calendar"></i> <%= new Date(item.created_at).toLocaleDateString('en-IN', { year: 'numeric', month: 'short', day: 'numeric' }) %></span>
+      </div>
+      <div class="media-view-actions">
+        <button class="btn btn-sm <%= typeof liked !== 'undefined' && liked ? 'btn-primary' : 'btn-secondary' %>" id="likeBtn" data-id="<%= item.id %>"><i class="fas fa-heart"></i> <span id="likeBtnText"><%= typeof liked !== 'undefined' && liked ? 'Liked' : 'Like' %></span></button>
+        <button class="btn btn-sm <%= typeof isFavorite !== 'undefined' && isFavorite ? 'btn-primary' : 'btn-secondary' %>" id="favBtn" data-id="<%= item.id %>"><i class="fas fa-star"></i> <span id="favBtnText"><%= typeof isFavorite !== 'undefined' && isFavorite ? 'Favorited' : 'Favorite' %></span></button>
+        <button class="btn btn-sm btn-secondary" id="shareBtn" data-id="<%= item.id %>"><i class="fas fa-share-alt"></i> Share</button>
+        <a href="/download/<%= item.id %>" class="btn btn-primary"><i class="fas fa-download"></i> Download</a>
+      </div>
+    </div>
+
+    <% if (typeof prev !== 'undefined' && prev || typeof next !== 'undefined' && next) { %>
+      <div class="media-view-nav bottom">
+        <div class="media-view-nav-between">
+          <% if (typeof prev !== 'undefined' && prev) { %>
+            <a href="/media/<%= prev.id %>" class="btn btn-sm"><i class="fas fa-chevron-left"></i> <%= prev.title.length > 35 ? prev.title.slice(0, 35) + '...' : prev.title %></a>
+          <% } else { %><span></span><% } %>
+          <% if (typeof next !== 'undefined' && next) { %>
+            <a href="/media/<%= next.id %>" class="btn btn-sm"><%= next.title.length > 35 ? next.title.slice(0, 35) + '...' : next.title %> <i class="fas fa-chevron-right"></i></a>
+          <% } else { %><span></span><% } %>
+        </div>
+      </div>
+    <% } %>
+  </div>
+  <script>
+    (function() {
+      var video = document.getElementById('videoPlayer');
+      if (!video) return;
+      var mediaId = video.getAttribute('data-media-id');
+      var saveTimer = null;
+      function savePosition() {
+        if (!video.duration || video.duration < 5) return;
+        fetch('/watch-position/' + mediaId, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({position: video.currentTime, duration: video.duration})
+        });
+      }
+      video.addEventListener('timeupdate', function() {
+        if (saveTimer) return;
+        saveTimer = setTimeout(function() { savePosition(); saveTimer = null; }, 5000);
+      });
+      video.addEventListener('pause', savePosition);
+      video.addEventListener('ended', function() {
+        fetch('/watch-position/' + mediaId, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({position: 0, duration: video.duration})
+        });
+      });
+    })();
+  </script>
+<%- include('../partials/footer') %>

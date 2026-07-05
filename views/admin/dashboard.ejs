@@ -1,0 +1,58 @@
+<%- include('../partials/header') %>
+  <div class="admin-page">
+    <h1 class="page-title">Admin Dashboard</h1>
+    <p class="page-subtitle"><i class="fas fa-tachometer-alt"></i> Overview of your street's media collection</p>
+
+    <div class="stats-grid">
+      <div class="stat-card">
+        <i class="fas fa-photo-video"></i>
+        <div class="stat-value"><%= stats.mediaCount %></div>
+        <div class="stat-label">Total Media</div>
+      </div>
+      <div class="stat-card">
+        <i class="fas fa-camera"></i>
+        <div class="stat-value"><%= stats.photoCount %></div>
+        <div class="stat-label">Photos</div>
+      </div>
+      <div class="stat-card">
+        <i class="fas fa-video"></i>
+        <div class="stat-value"><%= stats.videoCount %></div>
+        <div class="stat-label">Videos</div>
+      </div>
+      <div class="stat-card">
+        <i class="fas fa-tags"></i>
+        <div class="stat-value"><%= stats.categoryCount %></div>
+        <div class="stat-label">Categories</div>
+      </div>
+      <div class="stat-card">
+        <i class="fas fa-users"></i>
+        <div class="stat-value"><%= stats.userCount %></div>
+        <div class="stat-label">Users</div>
+      </div>
+      <div class="stat-card">
+        <i class="fas fa-download"></i>
+        <div class="stat-value"><%= stats.totalDownloads %></div>
+        <div class="stat-label">Downloads</div>
+      </div>
+    </div>
+
+    <div class="admin-actions">
+      <a href="/admin/media" class="btn btn-primary"><i class="fas fa-upload"></i> Manage Media</a>
+      <a href="/admin/categories" class="btn btn-secondary"><i class="fas fa-tags"></i> Categories</a>
+      <a href="/admin/users" class="btn btn-secondary"><i class="fas fa-users"></i> Users</a>
+    </div>
+
+    <h2 class="section-title"><i class="fas fa-clock"></i> Recent Uploads</h2>
+    <div class="admin-table-wrapper">
+      <table class="admin-table">
+        <thead><tr><th>Title</th><th>Type</th><th>Category</th><th>Date</th></tr></thead>
+        <tbody>
+          <% (stats.recentMedia || []).forEach(function(item) { %>
+            <tr><td><strong><%= item.title %></strong></td><td><span class="media-type-badge"><i class="fas fa-<%= item.type === 'video' ? 'video' : 'camera' %>"></i> <%= item.type %></span></td><td><%= item.category_name || '<span class="text-muted">—</span>' %></td><td><%= new Date(item.created_at).toLocaleDateString('en-IN') %></td></tr>
+          <% }) %>
+          <% if (!stats.recentMedia || stats.recentMedia.length === 0) { %><tr><td colspan="4" class="text-center">No media yet — <a href="/admin/media">upload now</a></td></tr><% } %>
+        </tbody>
+      </table>
+    </div>
+  </div>
+<%- include('../partials/footer') %>

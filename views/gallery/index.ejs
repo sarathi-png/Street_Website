@@ -1,0 +1,130 @@
+<%- include('../partials/header') %>
+  <div class="gallery-hero">
+    <h1><%= typeof title !== 'undefined' ? title : 'Gallery' %></h1>
+    <p>Browse and enjoy your street's memories</p>
+  </div>
+
+  <div class="gallery-controls">
+    <div class="category-filters">
+      <a href="/<%= currentType ? '?type=' + currentType + '&' : '' %><%= currentSort !== 'newest' ? 'sort=' + currentSort : '' %>" class="filter-chip <%= !currentCategory && !currentType ? 'active' : '' %>"><i class="fas fa-th"></i> All</a>
+      <a href="/?type=photo<%= currentCategory ? '&category=' + currentCategory : '' %><%= currentSort !== 'newest' ? '&sort=' + currentSort : '' %>" class="filter-chip <%= currentType === 'photo' ? 'active' : '' %>"><i class="fas fa-camera"></i> Photos</a>
+      <a href="/?type=video<%= currentCategory ? '&category=' + currentCategory : '' %><%= currentSort !== 'newest' ? '&sort=' + currentSort : '' %>" class="filter-chip <%= currentType === 'video' ? 'active' : '' %>"><i class="fas fa-video"></i> Videos</a>
+      <a href="/favorites" class="filter-chip <%= typeof isFavoritesPage !== 'undefined' && isFavoritesPage ? 'active' : '' %>"><i class="fas fa-heart"></i> Favorites</a>
+      <a href="/watch-later" class="filter-chip <%= typeof isWatchLaterPage !== 'undefined' && isWatchLaterPage ? 'active' : '' %>"><i class="fas fa-clock"></i> Continue</a>
+    </div>
+    <div class="gallery-controls-row">
+      <div class="category-filters">
+        <a href="/<%= currentType ? 'type=' + currentType + '&' : '' %>" class="filter-chip <%= !currentCategory ? 'active' : '' %>"><i class="fas fa-layer-group"></i> All</a>
+        <% (typeof categories !== 'undefined' ? categories : []).forEach(function(cat) { %>
+          <a href="/?<%= currentType ? 'type=' + currentType + '&' : '' %>category=<%= cat.id %><%= currentSort !== 'newest' ? '&sort=' + currentSort : '' %>" class="filter-chip <%= String(currentCategory) === String(cat.id) ? 'active' : '' %>"><%= cat.name %></a>
+        <% }) %>
+      </div>
+      <div class="sort-controls">
+        <label class="sort-label"><i class="fas fa-sort"></i></label>
+        <select id="sortSelect" class="sort-select" onchange="applySort(this.value)">
+          <option value="newest" <%= currentSort === 'newest' ? 'selected' : '' %>>Newest</option>
+          <option value="oldest" <%= currentSort === 'oldest' ? 'selected' : '' %>>Oldest</option>
+          <option value="views" <%= currentSort === 'views' ? 'selected' : '' %>>Most Viewed</option>
+          <option value="likes" <%= currentSort === 'likes' ? 'selected' : '' %>>Most Liked</option>
+          <option value="title" <%= currentSort === 'title' ? 'selected' : '' %>>A-Z</option>
+        </select>
+      </div>
+    </div>
+    <div class="gallery-controls-row">
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-sm btn-secondary" id="slideshowBtn" style="white-space:nowrap"><i class="fas fa-play-circle"></i> Slideshow</button>
+        <% if (currentCategory && currentCategory !== '' && currentType !== 'video') { %>
+          <a href="/download/category/<%= currentCategory %>" class="btn btn-sm btn-secondary" style="white-space:nowrap"><i class="fas fa-download"></i> Download All</a>
+        <% } %>
+      </div>
+      <form method="GET" action="/" class="search-form">
+        <% if (currentCategory) { %><input type="hidden" name="category" value="<%= currentCategory %>"><% } %>
+        <% if (currentType) { %><input type="hidden" name="type" value="<%= currentType %>"><% } %>
+        <% if (currentSort !== 'newest') { %><input type="hidden" name="sort" value="<%= currentSort %>"><% } %>
+        <input type="text" name="search" placeholder="Search title or description..." value="<%= search %>" class="search-input">
+        <button type="submit" class="btn btn-primary btn-sm"><i class="fas fa-search"></i></button>
+      </form>
+    </div>
+  </div>
+
+  <% if (typeof total !== 'undefined' && total > 0) { %>
+    <div class="results-info"><%= total %> item<%= total !== 1 ? 's' : '' %> found</div>
+  <% } %>
+
+  <% if ((typeof media !== 'undefined' ? media : []).length === 0) { %>
+    <div class="empty-state">
+      <i class="fas fa-photo-video"></i>
+      <p><%= typeof isFavoritesPage !== 'undefined' && isFavoritesPage ? 'No favorites yet — click the heart on any media to add it' : typeof isWatchLaterPage !== 'undefined' && isWatchLaterPage ? 'No continue watching — play a video to start tracking' : 'No media found in this collection yet' %></p>
+      <% if (typeof user !== 'undefined' && user && user.role === 'admin' && typeof isFavoritesPage === 'undefined') { %>
+        <a href="/admin/media" class="btn btn-primary"><i class="fas fa-upload"></i> Upload Media</a>
+      <% } %>
+    </div>
+  <% } else { %>
+    <div class="media-grid">
+      <% media.forEach(function(item) { %>
+        <a href="/media/<%= item.id %>" class="media-card" data-id="<%= item.id %>" data-type="<%= item.type %>" data-src="/stream/<%= item.id %>">
+          <div class="media-card-img">
+            <% if (item.thumbnail) { %>
+              <img src="/thumbnails/<%= item.thumbnail %>" alt="<%= item.title %>" loading="lazy">
+            <% } else if (item.type === 'photo') { %>
+              <img src="/uploads/<%= item.filename %>" alt="<%= item.title %>" loading="lazy">
+            <% } else { %>
+              <div class="media-card-placeholder"><i class="fas fa-video"></i></div>
+            <% } %>
+            <% if (typeof item.progress !== 'undefined' && item.progress > 0) { %>
+              <div class="progress-bar"><div class="progress-fill" style="width:<%= item.progress %>%"></div></div>
+            <% } %>
+            <div class="play-badge"><i class="fas fa-<%= item.type === 'video' ? 'play' : 'expand' %>"></i></div>
+            <button class="fav-btn <%= item.isFavorite ? 'fav-active' : '' %>" data-fav-id="<%= item.id %>" onclick="event.preventDefault();event.stopPropagation();toggleFavorite(<%= item.id %>,this)">
+              <i class="fas fa-heart"></i>
+            </button>
+            <div class="media-card-overlay">
+              <% if (item.type === 'video') { %>
+                <span class="btn btn-sm"><i class="fas fa-play"></i> Play</span>
+              <% } else { %>
+                <span class="btn btn-sm"><i class="fas fa-expand"></i> View</span>
+              <% } %>
+            </div>
+          </div>
+          <div class="media-card-info">
+            <h3 class="media-card-title"><%= item.title %></h3>
+            <% if (item.description) { %><p class="media-card-desc"><%= item.description.length > 60 ? item.description.slice(0, 60) + '...' : item.description %></p><% } %>
+            <div class="media-card-meta">
+              <% if (item.category_name) { %><span class="media-tag"><%= item.category_name %></span><% } %>
+              <% if (item.tags && item.tags.length) { %><% item.tags.slice(0,2).forEach(function(t) { %><span class="media-tag media-tag-tag"><%= t %></span><% }) %><% } %>
+              <span class="media-type-badge"><i class="fas fa-<%= item.type === 'video' ? 'video' : 'camera' %>"></i> <%= item.type %></span>
+              <% if (item.drive_file_id) { %><span class="media-tag" style="background:var(--clr-primary-light);color:var(--clr-primary);font-size:0.65rem"><i class="fab fa-google-drive"></i></span><% } %>
+              <span class="media-stat"><i class="fas fa-eye"></i> <%= item.views || 0 %></span>
+              <span class="media-stat"><i class="fas fa-heart"></i> <%= item.likes || 0 %></span>
+            </div>
+          </div>
+        </a>
+      <% }) %>
+    </div>
+
+    <% if (totalPages > 1) { %>
+      <div class="pagination">
+        <% if (currentPage > 1) { %>
+          <a href="<%= buildPageUrl(currentPage - 1) %>" class="btn btn-sm btn-secondary"><i class="fas fa-chevron-left"></i> Prev</a>
+        <% } %>
+        <span class="pagination-info">Page <%= currentPage %> of <%= totalPages %></span>
+        <% if (currentPage < totalPages) { %>
+          <a href="<%= buildPageUrl(currentPage + 1) %>" class="btn btn-sm btn-secondary">Next <i class="fas fa-chevron-right"></i></a>
+        <% } %>
+      </div>
+    <% } %>
+  <% } %>
+  <script>
+    function applySort(val) {
+      var u = new URL(window.location);
+      if (val === 'newest') u.searchParams.delete('sort'); else u.searchParams.set('sort', val);
+      u.searchParams.delete('page');
+      window.location = u;
+    }
+    function toggleFavorite(id, btn) {
+      fetch('/favorite/' + id, {method:'POST'}).then(function(r){return r.json()}).then(function(d){
+        if(d.favorited){btn.classList.add('fav-active')}else{btn.classList.remove('fav-active')}
+      });
+    }
+  </script>
+<%- include('../partials/footer') %>

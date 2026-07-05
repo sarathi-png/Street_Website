@@ -1,0 +1,52 @@
+<%- include('../partials/header') %>
+  <div class="admin-page">
+    <div class="admin-header">
+      <div>
+        <h1 class="page-title">Categories</h1>
+        <p class="page-subtitle"><i class="fas fa-tags"></i> Organise media into collections</p>
+      </div>
+    </div>
+
+    <div class="upload-section">
+      <h2 class="section-title"><i class="fas fa-plus-circle"></i> New Category</h2>
+      <form method="POST" action="/admin/categories/create" class="upload-form">
+        <div class="form-group"><label for="name">Category Name</label><input type="text" id="name" name="name" required placeholder="e.g. Pongal 2026, Diwali 2025"></div>
+        <div class="form-group"><label for="description">Description</label><textarea id="description" name="description" rows="2" placeholder="Optional description"></textarea></div>
+        <button type="submit" class="btn btn-primary"><i class="fas fa-plus"></i> Create Category</button>
+      </form>
+    </div>
+
+    <h2 class="section-title"><i class="fas fa-list"></i> All Categories</h2>
+    <div class="admin-table-wrapper">
+      <table class="admin-table">
+        <thead><tr><th>Name</th><th>Description</th><th>Media</th><th>Actions</th></tr></thead>
+        <tbody>
+          <% (typeof categories !== 'undefined' ? categories : []).forEach(function(cat) { %>
+            <tr>
+              <td><strong><%= cat.name %></strong></td>
+              <td><%= cat.description || '<span class="text-muted">—</span>' %></td>
+              <td><%= cat.media_count %></td>
+              <td class="action-cell">
+                <button class="btn btn-sm btn-secondary btn-edit" data-cat-id="<%= cat.id %>" data-cat-name="<%= cat.name %>" data-cat-desc="<%= cat.description %>"><i class="fas fa-edit"></i></button>
+                <form method="POST" action="/admin/categories/delete/<%= cat.id %>" class="inline-form" onsubmit="return confirm('Delete this category? Media will be uncategorized.')"><button type="submit" class="btn btn-sm btn-danger"><i class="fas fa-trash"></i></button></form>
+              </td>
+            </tr>
+          <% }) %>
+          <% if (!categories || categories.length === 0) { %><tr><td colspan="4" class="text-center">No categories yet — create one above</td></tr><% } %>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="catEditModal" class="modal hidden">
+    <div class="modal-overlay" id="catModalOverlay"></div>
+    <div class="modal-content">
+      <h2><i class="fas fa-edit"></i> Edit Category</h2>
+      <form id="catEditForm" method="POST" class="modal-form">
+        <div class="form-group"><label for="cat_edit_name">Name</label><input type="text" id="cat_edit_name" name="name" required></div>
+        <div class="form-group"><label for="cat_edit_desc">Description</label><textarea id="cat_edit_desc" name="description" rows="2"></textarea></div>
+        <div class="modal-actions"><button type="button" class="btn btn-secondary" id="catModalCancel"><i class="fas fa-times"></i> Cancel</button><button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Save</button></div>
+      </form>
+    </div>
+  </div>
+<%- include('../partials/footer') %>

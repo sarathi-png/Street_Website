@@ -1,0 +1,54 @@
+<%- include('../partials/header') %>
+  <div class="admin-page">
+    <div class="admin-header">
+      <div>
+        <h1 class="page-title">Users</h1>
+        <p class="page-subtitle"><i class="fas fa-users"></i> Manage street member access</p>
+      </div>
+    </div>
+
+    <div class="upload-section">
+      <h2 class="section-title"><i class="fas fa-user-plus"></i> Create User</h2>
+      <form method="POST" action="/admin/users/create" class="upload-form">
+        <div class="form-group"><label for="username"><i class="fas fa-user"></i> Username</label><input type="text" id="username" name="username" required></div>
+        <div class="form-group"><label for="display_name"><i class="fas fa-id-card"></i> Display Name</label><input type="text" id="display_name" name="display_name" placeholder="Defaults to username"></div>
+        <div class="form-group"><label for="password"><i class="fas fa-lock"></i> Password</label><input type="password" id="password" name="password" required minlength="4"></div>
+        <div class="form-group"><label for="role"><i class="fas fa-shield-alt"></i> Role</label><select id="role" name="role"><option value="member">Member</option><option value="admin">Admin</option></select></div>
+        <button type="submit" class="btn btn-primary"><i class="fas fa-user-plus"></i> Create User</button>
+      </form>
+    </div>
+
+    <h2 class="section-title"><i class="fas fa-list"></i> All Users</h2>
+    <div class="admin-table-wrapper">
+      <table class="admin-table">
+        <thead><tr><th>Username</th><th>Display Name</th><th>Role</th><th>Created</th><th>Actions</th></tr></thead>
+        <tbody>
+          <% (typeof users !== 'undefined' ? users : []).forEach(function(u) { %>
+            <tr>
+              <td><strong><%= u.username %></strong></td>
+              <td><%= u.display_name %></td>
+              <td><span class="role-badge role-<%= u.role %>"><i class="fas fa-<%= u.role === 'admin' ? 'crown' : 'user' %>"></i> <%= u.role %></span></td>
+              <td><%= new Date(u.created_at).toLocaleDateString('en-IN') %></td>
+              <td class="action-cell">
+                <button class="btn btn-sm btn-secondary btn-edit" data-user-id="<%= u.id %>" data-user-name="<%= u.username %>"><i class="fas fa-key"></i></button>
+                <% if (u.role !== 'admin') { %><form method="POST" action="/admin/users/delete/<%= u.id %>" class="inline-form" onsubmit="return confirm('Delete user <%= u.username %>? This cannot be undone.')"><button type="submit" class="btn btn-sm btn-danger"><i class="fas fa-trash"></i></button></form><% } %>
+              </td>
+            </tr>
+          <% }) %>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="passwordModal" class="modal hidden">
+    <div class="modal-overlay" id="pwModalOverlay"></div>
+    <div class="modal-content">
+      <h2><i class="fas fa-key"></i> Reset Password</h2>
+      <form id="passwordForm" method="POST" class="modal-form">
+        <p style="margin-bottom:16px;color:var(--clr-text-secondary)">Resetting password for <strong id="pwUserName"></strong></p>
+        <div class="form-group"><label for="pw_password">New Password</label><input type="password" id="pw_password" name="password" required minlength="4"></div>
+        <div class="modal-actions"><button type="button" class="btn btn-secondary" id="pwModalCancel"><i class="fas fa-times"></i> Cancel</button><button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Save Password</button></div>
+      </form>
+    </div>
+  </div>
+<%- include('../partials/footer') %>

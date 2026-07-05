@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title><%= typeof title !== 'undefined' ? title + ' — ' : '' %>Street Gallery</title>
+  <link rel="stylesheet" href="/css/style.css">
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#b83a2c">
+  <link rel="icon" href="/icon-192.svg" sizes="192x192" type="image/svg+xml">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏘️</text></svg>">
+</head>
+<body>
+  <nav class="nav">
+    <div class="nav-inner">
+      <a href="/" class="nav-brand"><i class="fas fa-home"></i> Street Gallery</a>
+      <div class="nav-links">
+        <% if (typeof user !== 'undefined' && user) { %>
+          <a href="/" class="nav-link <%= path === '/' || path.startsWith('/media') || path.startsWith('/category') || path.startsWith('/download') ? 'active' : '' %>"><i class="fas fa-images"></i> Gallery</a>
+          <a href="/favorites" class="nav-link <%= path === '/favorites' ? 'active' : '' %>"><i class="fas fa-heart"></i> Favorites</a>
+          <a href="/watch-later" class="nav-link <%= path === '/watch-later' ? 'active' : '' %>"><i class="fas fa-clock"></i> Watch</a>
+          <% if (user.role === 'admin') { %>
+            <a href="/admin" class="nav-link <%= path.startsWith('/admin') ? 'active' : '' %>"><i class="fas fa-cog"></i> Admin</a>
+            <a href="/admin/media" class="nav-link"><i class="fas fa-upload"></i> Upload</a>
+          <% } %>
+          <span class="nav-user"><i class="fas fa-user-circle"></i> <%= user.display_name %></span>
+          <a href="/logout" class="nav-link nav-logout"><i class="fas fa-sign-out-alt"></i></a>
+        <% } %>
+      </div>
+      <button class="theme-toggle" id="themeToggle" aria-label="Toggle theme" title="Toggle theme">🌙</button>
+    </div>
+  </nav>
+  <main class="main">
