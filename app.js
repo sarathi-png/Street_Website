@@ -14,11 +14,19 @@ app.set('trust proxy', 1);
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 
-const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(__dirname, 'uploads');
-const THUMBS_DIR = process.env.THUMBNAILS_DIR || path.join(__dirname, 'thumbnails');
+const UPLOADS_DIR = process.env.UPLOADS_DIR || process.env.RAILWAY_VOLUME_MOUNT_PATH
+  ? path.join(process.env.RAILWAY_VOLUME_MOUNT_PATH || '/data', 'uploads')
+  : path.join(__dirname, 'uploads');
+const THUMBS_DIR = process.env.THUMBNAILS_DIR || process.env.RAILWAY_VOLUME_MOUNT_PATH
+  ? path.join(process.env.RAILWAY_VOLUME_MOUNT_PATH || '/data', 'thumbnails')
+  : path.join(__dirname, 'thumbnails');
+const DATA_FILE = process.env.DATA_FILE || process.env.RAILWAY_VOLUME_MOUNT_PATH
+  ? path.join(process.env.RAILWAY_VOLUME_MOUNT_PATH || '/data', 'data.db')
+  : path.join(__dirname, 'data.db');
 [{ d: UPLOADS_DIR }, { d: THUMBS_DIR }].forEach(({ d }) => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
 process.env.UPLOADS_DIR = UPLOADS_DIR;
 process.env.THUMBNAILS_DIR = THUMBS_DIR;
+process.env.DATA_FILE = DATA_FILE;
 
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());

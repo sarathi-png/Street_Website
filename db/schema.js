@@ -10,9 +10,23 @@ let SQL = null;
 async function getDb() {
   if (db) return db;
   SQL = await initSqlJs();
+
+  // Ensure parent directory exists
+  const dir = path.dirname(DB_PATH);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
   if (fs.existsSync(DB_PATH)) {
-    const buffer = fs.readFileSync(DB_PATH);
-    db = new SQL.Database(buffer);
+    try {
+      const buffer = fs.readFileSync(DB_PATH);
+      db = new SQL.Database(buffer);
+      // Quick integrity check
+      const check = db.exec('PRAGMA quick_check');
+      if (check && check[0] && check[0].values[0][0] !== 'ok') throw new Error('integrity failed');
+    } catch (e) {
+      console.error(`Database corrupted (${e.message}), deleting and recreating...`);
+      try { fs.unlinkSync(DB_PATH); } catch (e2) {}
+      db = new SQL.Database();
+    }
   } else {
     db = new SQL.Database();
   }
@@ -22,8 +36,12 @@ async function getDb() {
 
 function saveDb() {
   if (!db) return;
-  const data = db.export();
-  fs.writeFileSync(DB_PATH, Buffer.from(data));
+  try {
+    const data = db.export();
+    fs.writeFileSync(DB_PATH, Buffer.from(data));
+  } catch (e) {
+    console.error('Failed to save database:', e.message);
+  }
 }
 
 function dbGet(sql, ...params) {
