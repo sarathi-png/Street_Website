@@ -26,6 +26,12 @@
             <source src="/stream/<%= item.id %>" type="<%= item.mime_type || 'video/mp4' %>">
             Your browser doesn't support this video format.
           </video>
+          <div class="video-error-overlay hidden" id="videoError">
+            <i class="fas fa-exclamation-triangle"></i>
+            <p><strong>Unable to load video</strong></p>
+            <p class="video-error-detail">If this is a Drive video, ensure the file is shared as <strong>"Anyone with the link"</strong> on Google Drive.</p>
+            <button class="btn btn-sm btn-secondary" onclick="document.getElementById('videoError').classList.add('hidden');document.getElementById('videoPlayer').load()">Retry</button>
+          </div>
           <% if (typeof watchPosition !== 'undefined' && watchPosition && watchPosition.position_seconds > 0) { %>
             <div class="resume-notice" id="resumeNotice">
               <span>Resume from <%= Math.floor(watchPosition.position_seconds / 60) %>m <%= Math.floor(watchPosition.position_seconds % 60) %>s</span>
@@ -85,6 +91,18 @@
       if (!video) return;
       var mediaId = video.getAttribute('data-media-id');
       var saveTimer = null;
+      var errorOverlay = document.getElementById('videoError');
+
+      video.addEventListener('error', function() {
+        if (errorOverlay) errorOverlay.classList.remove('hidden');
+      });
+
+      video.addEventListener('stalled', function() {
+        setTimeout(function() {
+          if (video.readyState < 2 && errorOverlay) errorOverlay.classList.remove('hidden');
+        }, 10000);
+      });
+
       function savePosition() {
         if (!video.duration || video.duration < 5) return;
         fetch('/watch-position/' + mediaId, {

@@ -123,7 +123,8 @@
     }
     function toggleFavorite(id, btn) {
       fetch('/favorite/' + id, {method:'POST'}).then(function(r){return r.json()}).then(function(d){
-        if(d.favorited){btn.classList.add('fav-active')}else{btn.classList.remove('fav-active')}
+        if(d.favorited){btn.classList.add('fav-active'); showToast('Added to favorites', 'success');}
+        else{btn.classList.remove('fav-active'); showToast('Removed from favorites', 'success');}
       });
     }
   </script>

@@ -356,7 +356,7 @@ function serveFromDisk(item, filePath, req, res) {
 
 function proxyFromDrive(item, req, res) {
   const apiKey = process.env.GOOGLE_DRIVE_API_KEY;
-  if (!apiKey) return res.status(502).render('error', { title: 'Error', message: 'Drive API key not configured' });
+  if (!apiKey) return res.status(502).json({ error: 'Drive API key not configured' });
 
   const mimeType = item.mime_type || 'video/mp4';
   const url = `https://www.googleapis.com/drive/v3/files/${item.drive_file_id}?alt=media&key=${apiKey}`;
@@ -368,7 +368,10 @@ function proxyFromDrive(item, req, res) {
     if (driveRes.statusCode !== 200 && driveRes.statusCode !== 206) {
       let d = '';
       driveRes.on('data', c => d += c);
-      driveRes.on('end', () => res.status(502).render('error', { title: 'Error', message: 'Drive proxy failed' }));
+      driveRes.on('end', () => {
+        console.error(`Drive proxy failed: status=${driveRes.statusCode} body=${d.slice(0, 200)}`);
+        res.status(502).json({ error: 'Video unavailable', driveStatus: driveRes.statusCode, message: 'Ensure the file is shared as "Anyone with the link" on Google Drive' });
+      });
       return;
     }
 

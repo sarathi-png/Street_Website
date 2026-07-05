@@ -53,6 +53,7 @@
     <div class="admin-header" style="margin-top:8px">
       <h2 class="section-title" style="margin:0"><i class="fas fa-list"></i> All Media</h2>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <button type="button" class="btn btn-sm btn-secondary" id="regenThumbBtn" onclick="regenThumbnails()"><i class="fas fa-sync-alt"></i> Regenerate Thumbnails</button>
         <form method="POST" action="/admin/media/bulk-move" id="bulkForm" style="display:none;align-items:center;gap:8px">
           <span id="bulkCount">0 selected</span>
           <select name="category_id" id="bulkCategorySelect"><option value="">Move to category...</option>
@@ -115,4 +116,30 @@
       </form>
     </div>
   </div>
+  <script>
+    function regenThumbnails() {
+      var btn = document.getElementById('regenThumbBtn');
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Regenerating...';
+      fetch('/admin/media/regenerate-thumbnails', { method: 'POST' })
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+          btn.disabled = false;
+          btn.innerHTML = '<i class="fas fa-sync-alt"></i> Regenerate Thumbnails';
+          if (d.success > 0) {
+            showToast('Regenerated ' + d.success + ' thumbnail' + (d.success !== 1 ? 's' : ''), 'success');
+            setTimeout(function() { location.reload(); }, 1000);
+          } else if (d.failed > 0) {
+            showToast(d.failed + ' failed — ' + d.lastError, 'error');
+          } else {
+            showToast('No videos need thumbnails', 'success');
+          }
+        })
+        .catch(function(e) {
+          btn.disabled = false;
+          btn.innerHTML = '<i class="fas fa-sync-alt"></i> Regenerate Thumbnails';
+          showToast('Regeneration failed: ' + e.message, 'error');
+        });
+    }
+  </script>
 <%- include('../partials/footer') %>

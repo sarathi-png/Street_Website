@@ -149,10 +149,12 @@ function downloadDriveFilePartial(fileId, destPath, apiKey, maxBytes) {
 function generateVideoThumb(videoPath, thumbPath) {
   return new Promise((resolve, reject) => {
     const proc = spawn(ffmpegPath, [
+      '-ss', '0.01',
       '-i', videoPath,
       '-vframes', '1',
       '-s', '400x300',
       '-q:v', '2',
+      '-loglevel', 'error',
       '-y',
       thumbPath
     ]);
@@ -179,7 +181,7 @@ async function importDriveFile(fileId, title, categoryId, userId, driveFileInfo,
     let thumbFilename = 'thumb_' + finalFilename.replace(ext, '.jpg');
     const tempVideoPath = path.join(UPLOADS_DIR, uuidv4() + ext);
     try {
-      await downloadDriveFilePartial(fileId, tempVideoPath, apiKey, 5 * 1024 * 1024);
+      await downloadDriveFilePartial(fileId, tempVideoPath, apiKey, 50 * 1024 * 1024);
       await generateVideoThumb(tempVideoPath, path.join(THUMBS_DIR, thumbFilename));
     } catch (e) {
       console.error('Drive video thumbnail generation failed:', e.message);
@@ -297,7 +299,7 @@ router.post('/media/upload', requireAdmin, upload.single('file'), async (req, re
     const newMedia = dbGet('SELECT id FROM media ORDER BY id DESC LIMIT 1');
     if (newMedia && tags) syncMediaTags(newMedia.id, tags.split(',').map(t => t.trim()));
 
-    res.redirect('/admin/media');
+    res.redirect('/admin/media?msg=Uploaded+successfully');
   } catch (err) {
     console.error('Upload error:', err);
     res.status(500).json({ error: 'Upload failed: ' + err.message });
@@ -399,7 +401,7 @@ router.post('/media/edit/:id', requireAdmin, (req, res) => {
   const { title, category_id, description, tags } = req.body;
   dbRun('UPDATE media SET title = ?, category_id = ?, description = ? WHERE id = ?', title, category_id || null, description || '', req.params.id);
   if (tags !== undefined) syncMediaTags(req.params.id, tags.split(',').map(t => t.trim()));
-  res.redirect('/admin/media');
+  res.redirect('/admin/media?msg=Media+updated');
 });
 
 router.post('/media/delete/:id', requireAdmin, (req, res) => {
@@ -409,7 +411,7 @@ router.post('/media/delete/:id', requireAdmin, (req, res) => {
   if (fs.existsSync(fp)) fs.unlinkSync(fp);
   if (item.thumbnail) { const tp = path.join(THUMBS_DIR, item.thumbnail); if (fs.existsSync(tp)) fs.unlinkSync(tp); }
   dbRun('DELETE FROM media WHERE id = ?', req.params.id);
-  res.redirect('/admin/media');
+  res.redirect('/admin/media?msg=Media+deleted');
 });
 
 router.post('/media/bulk-delete', requireAdmin, (req, res) => {
@@ -422,14 +424,14 @@ router.post('/media/bulk-delete', requireAdmin, (req, res) => {
     if (item.thumbnail) { const tp = path.join(THUMBS_DIR, item.thumbnail); if (fs.existsSync(tp)) fs.unlinkSync(tp); }
     dbRun('DELETE FROM media WHERE id = ?', id);
   });
-  res.redirect('/admin/media');
+  res.redirect('/admin/media?msg=Items+deleted');
 });
 
 router.post('/media/bulk-move', requireAdmin, (req, res) => {
   const ids = (req.body.ids || '').split(',').map(Number).filter(Boolean);
   const catId = req.body.category_id || null;
   if (ids.length) dbRun(`UPDATE media SET category_id = ? WHERE id IN (${ids.join(',')})`, catId);
-  res.redirect('/admin/media');
+  res.redirect('/admin/media?msg=Items+moved');
 });
 
 router.get('/categories', requireAdmin, (req, res) => {
@@ -443,19 +445,19 @@ router.post('/categories/create', requireAdmin, (req, res) => {
   if (!name) return res.status(400).json({ error: 'Name required' });
   try {
     dbRun('INSERT INTO categories (name, description) VALUES (?, ?)', name, description || '');
-    res.redirect('/admin/categories');
+    res.redirect('/admin/categories?msg=Category+created');
   } catch (err) { res.status(400).json({ error: 'Category name already exists' }); }
 });
 
 router.post('/categories/edit/:id', requireAdmin, (req, res) => {
   const { name, description } = req.body;
   dbRun('UPDATE categories SET name = ?, description = ? WHERE id = ?', name, description || '', req.params.id);
-  res.redirect('/admin/categories');
+  res.redirect('/admin/categories?msg=Category+updated');
 });
 
 router.post('/categories/delete/:id', requireAdmin, (req, res) => {
   dbRun('DELETE FROM categories WHERE id = ?', req.params.id);
-  res.redirect('/admin/categories');
+  res.redirect('/admin/categories?msg=Category+deleted');
 });
 
 router.get('/users', requireAdmin, (req, res) => {
@@ -470,7 +472,7 @@ router.post('/users/create', requireAdmin, (req, res) => {
     const hash = bcrypt.hashSync(password, 10);
     dbRun('INSERT INTO users (username, password_hash, display_name, role) VALUES (?, ?, ?, ?)',
       username, hash, display_name || username, role || 'member');
-    res.redirect('/admin/users');
+    res.redirect('/admin/users?msg=User+created');
   } catch (err) { res.status(400).json({ error: 'Username already exists' }); }
 });
 
@@ -478,14 +480,51 @@ router.post('/users/delete/:id', requireAdmin, (req, res) => {
   const user = dbGet('SELECT * FROM users WHERE id = ?', req.params.id);
   if (!user || user.role === 'admin') return res.status(400).json({ error: user ? 'Cannot delete admin' : 'Not found' });
   dbRun('DELETE FROM users WHERE id = ?', req.params.id);
-  res.redirect('/admin/users');
+  res.redirect('/admin/users?msg=User+deleted');
 });
 
 router.post('/users/reset-password/:id', requireAdmin, (req, res) => {
   const { password } = req.body;
   if (!password) return res.status(400).json({ error: 'Password required' });
   dbRun('UPDATE users SET password_hash = ? WHERE id = ?', bcrypt.hashSync(password, 10), req.params.id);
-  res.redirect('/admin/users');
+  res.redirect('/admin/users?msg=Password+reset');
+});
+
+router.post('/media/regenerate-thumbnails', requireAdmin, async (req, res) => {
+  const apiKey = process.env.GOOGLE_DRIVE_API_KEY;
+  const videos = dbAll("SELECT * FROM media WHERE type = 'video' AND (thumbnail IS NULL OR thumbnail = '')");
+  if (!videos.length) return res.json({ success: 0, failed: 0, message: 'No videos need thumbnails' });
+
+  let success = 0, failed = 0, lastError = '';
+  for (const item of videos) {
+    let tempVideoPath = null;
+    try {
+      const ext = item.filename ? path.extname(item.filename) : '.mp4';
+      tempVideoPath = path.join(UPLOADS_DIR, uuidv4() + ext);
+
+      if (item.drive_file_id && apiKey) {
+        await downloadDriveFilePartial(item.drive_file_id, tempVideoPath, apiKey, 50 * 1024 * 1024);
+      } else {
+        const localPath = path.join(UPLOADS_DIR, item.filename);
+        if (!fs.existsSync(localPath)) { failed++; continue; }
+        tempVideoPath = localPath;
+      }
+
+      const thumbFilename = 'thumb_' + item.id + '.jpg';
+      await generateVideoThumb(tempVideoPath, path.join(THUMBS_DIR, thumbFilename));
+      dbRun('UPDATE media SET thumbnail = ? WHERE id = ?', thumbFilename, item.id);
+      success++;
+    } catch (e) {
+      console.error(`Thumbnail regen failed for media ${item.id}:`, e.message);
+      failed++;
+      lastError = e.message;
+    } finally {
+      try {
+        if (tempVideoPath && fs.existsSync(tempVideoPath) && item.drive_file_id) fs.unlinkSync(tempVideoPath);
+      } catch (e) {}
+    }
+  }
+  res.json({ success, failed, total: videos.length, lastError });
 });
 
 router.use((err, req, res, next) => {

@@ -231,6 +231,8 @@ function showToast(msg, type) {
 function initLikeShare() {
   var likeBtn = document.getElementById('likeBtn');
   var shareBtn = document.getElementById('shareBtn');
+  var favBtn = document.getElementById('favBtn');
+
   if (likeBtn) {
     likeBtn.addEventListener('click', function () {
       fetch('/like/' + likeBtn.getAttribute('data-id'), { method: 'POST' })
@@ -242,10 +244,12 @@ function initLikeShare() {
             likeBtn.className = 'btn btn-sm btn-primary';
             txt.textContent = 'Liked';
             num.textContent = parseInt(num.textContent) + 1;
+            showToast('Liked', 'success');
           } else {
             likeBtn.className = 'btn btn-sm btn-secondary';
             txt.textContent = 'Like';
             num.textContent = parseInt(num.textContent) - 1;
+            showToast('Unliked', 'success');
           }
         });
     });
@@ -260,6 +264,25 @@ function initLikeShare() {
             if (navigator.clipboard) { navigator.clipboard.writeText(full).then(function () { showToast('Share link copied!', 'success'); }); }
             else { prompt('Copy this link:', full); }
           } else { showToast('Failed to create share link', 'error'); }
+        });
+    });
+  }
+
+  if (favBtn) {
+    favBtn.addEventListener('click', function () {
+      fetch('/favorite/' + favBtn.getAttribute('data-id'), { method: 'POST' })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          var txt = document.getElementById('favBtnText');
+          if (d.favorited) {
+            favBtn.className = 'btn btn-sm btn-primary';
+            txt.textContent = 'Favorited';
+            showToast('Added to favorites', 'success');
+          } else {
+            favBtn.className = 'btn btn-sm btn-secondary';
+            txt.textContent = 'Favorite';
+            showToast('Removed from favorites', 'success');
+          }
         });
     });
   }
