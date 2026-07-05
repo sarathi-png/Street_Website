@@ -354,7 +354,7 @@ function serveFromDisk(item, filePath, req, res) {
   }
 }
 
-function proxyFromDrive(item, localPath, req, res) {
+function proxyFromDrive(item, req, res) {
   const apiKey = process.env.GOOGLE_DRIVE_API_KEY;
   if (!apiKey) return res.status(502).render('error', { title: 'Error', message: 'Drive API key not configured' });
 
@@ -382,27 +382,6 @@ function proxyFromDrive(item, localPath, req, res) {
     if (driveRes.headers['content-length']) respHeaders['Content-Length'] = driveRes.headers['content-length'];
 
     res.writeHead(driveRes.statusCode, respHeaders);
-
-    // Save to local cache while streaming to client (only for full non-range responses)
-    if (driveRes.statusCode === 200 && !req.headers.range) {
-      const file = fs.createWriteStream(localPath);
-      driveRes.pipe(file);
-      driveRes.on('end', () => {
-        file.close();
-        // Verify cached file size matches expected
-        try {
-          const expectedSize = parseInt(item.file_size) || 0;
-          if (expectedSize > 0 && fs.existsSync(localPath)) {
-            const cachedSize = fs.statSync(localPath).size;
-            if (cachedSize < expectedSize) {
-              console.error(`Cache incomplete for ${item.title}: ${cachedSize}/${expectedSize} bytes, removing`);
-              fs.unlinkSync(localPath);
-            }
-          }
-        } catch (e) {}
-      });
-      driveRes.on('error', () => { try { fs.unlinkSync(localPath); } catch(e) {} });
-    }
     driveRes.pipe(res);
   });
 }
@@ -411,25 +390,12 @@ router.get('/stream/:id', requireAuth, (req, res) => {
   const item = dbGet('SELECT * FROM media WHERE id = ?', req.params.id);
   if (!item) return res.status(404).render('error', { title: 'Not Found', message: 'Media not found' });
 
+  // Drive files — always stream from Drive (no local cache)
+  if (item.drive_file_id) return proxyFromDrive(item, req, res);
+
+  // Local files — serve from disk
   const filePath = path.join(UPLOADS_DIR, item.filename);
-
-  // 1. Local file exists — verify integrity before serving
-  if (fs.existsSync(filePath)) {
-    // For Drive-backed files, verify cached file isn't truncated
-    if (item.drive_file_id && item.file_size) {
-      const cachedSize = fs.statSync(filePath).size;
-      const expectedSize = parseInt(item.file_size);
-      if (expectedSize > 0 && cachedSize < expectedSize) {
-        // Cache is incomplete — delete and re-fetch from Drive
-        try { fs.unlinkSync(filePath); } catch (e) {}
-        return proxyFromDrive(item, filePath, req, res);
-      }
-    }
-    return serveFromDisk(item, filePath, req, res);
-  }
-
-  // 2. Has Drive file ID — proxy + cache locally
-  if (item.drive_file_id) return proxyFromDrive(item, filePath, req, res);
+  if (fs.existsSync(filePath)) return serveFromDisk(item, filePath, req, res);
 
   res.status(404).render('error', { title: 'Not Found', message: 'File not found' });
 });
@@ -439,23 +405,7 @@ router.get('/download/:id', requireAuth, (req, res) => {
   if (!item) return res.status(404).render('error', { title: 'Not Found', message: 'Media not found' });
   dbRun('UPDATE media SET downloads = downloads + 1 WHERE id = ?', req.params.id);
 
-  const filePath = path.join(UPLOADS_DIR, item.filename);
-
-  if (fs.existsSync(filePath)) {
-    // For Drive-backed files, verify cached file isn't truncated
-    if (item.drive_file_id && item.file_size) {
-      const cachedSize = fs.statSync(filePath).size;
-      const expectedSize = parseInt(item.file_size);
-      if (expectedSize > 0 && cachedSize < expectedSize) {
-        try { fs.unlinkSync(filePath); } catch (e) {}
-      } else {
-        return res.download(filePath, item.title + path.extname(item.filename));
-      }
-    } else {
-      return res.download(filePath, item.title + path.extname(item.filename));
-    }
-  }
-
+  // Drive files — stream directly from Drive
   if (item.drive_file_id) {
     const apiKey = process.env.GOOGLE_DRIVE_API_KEY;
     if (!apiKey) return res.status(502).json({ error: 'Drive API key not configured' });
@@ -464,13 +414,15 @@ router.get('/download/:id', requireAuth, (req, res) => {
       if (driveRes.statusCode !== 200) return res.status(502).json({ error: 'Drive proxy failed' });
       const filename = item.title + path.extname(item.filename);
       res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-      const file = fs.createWriteStream(filePath);
-      driveRes.pipe(file);
+      res.setHeader('Content-Type', item.mime_type || 'application/octet-stream');
       driveRes.pipe(res);
-      driveRes.on('error', () => { try { fs.unlinkSync(filePath); } catch(e) {} });
     });
     return;
   }
+
+  // Local files — serve from disk
+  const filePath = path.join(UPLOADS_DIR, item.filename);
+  if (fs.existsSync(filePath)) return res.download(filePath, item.title + path.extname(item.filename));
 
   res.status(404).render('error', { title: 'Not Found', message: 'File not found' });
 });
