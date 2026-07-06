@@ -87,30 +87,80 @@ async function listDriveFolderFiles(folderId, apiKey) {
 
 function downloadDriveFile(fileId, destPath, apiKey) {
   return new Promise((resolve, reject) => {
-    const url = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&key=${apiKey}`;
-    const file = fs.createWriteStream(destPath);
-    let aborted = false;
-    function cleanup(errMsg) {
-      if (aborted) return;
-      aborted = true;
-      try { file.close(); } catch (e) {}
-      try { if (fs.existsSync(destPath)) fs.unlinkSync(destPath); } catch (e) {}
-      reject(new Error(errMsg || 'Download failed'));
+    function doDownload(url, redirectsLeft) {
+      const file = fs.createWriteStream(destPath);
+      let aborted = false;
+      function cleanup(errMsg) {
+        if (aborted) return;
+        aborted = true;
+        try { file.close(); } catch (e) {}
+        try { if (fs.existsSync(destPath)) fs.unlinkSync(destPath); } catch (e) {}
+        reject(new Error(errMsg || 'Download failed'));
+      }
+      https.get(url, { headers: { 'User-Agent': 'StreetGallery/1.0' }, timeout: 600000 }, (res) => {
+        // Handle redirects
+        if ((res.statusCode === 301 || res.statusCode === 302 || res.statusCode === 303) && redirectsLeft > 0) {
+          const loc = res.headers.location;
+          if (!loc) { res.resume(); cleanup('Redirect with no location'); return; }
+          res.resume();
+          const cookies = res.headers['set-cookie'];
+          const opts = { headers: { 'User-Agent': 'StreetGallery/1.0', 'Accept': '*/*' } };
+          if (cookies) opts.headers['Cookie'] = cookies.join('; ');
+          https.get(loc, opts, (r2) => {
+            r2.redirectCount = redirectsLeft - 1;
+            doDownloadResponse(r2, redirectsLeft - 1, file, cleanup, resolve);
+          }).on('error', (e) => cleanup('Redirect error: ' + e.message));
+          return;
+        }
+        doDownloadResponse(res, redirectsLeft, file, cleanup, resolve);
+      }).on('error', (e) => cleanup('Request error: ' + e.message))
+        .on('timeout', function() { this.destroy(); cleanup('Download timed out after 10 min'); });
     }
-    const req = https.get(url, { headers: { 'User-Agent': 'StreetGallery/1.0' }, timeout: 600000 }, (res) => {
+
+    function doDownloadResponse(res, redirectsLeft, file, cleanup, resolve) {
       if (res.statusCode === 200) {
+        const ct = res.headers['content-type'] || '';
+        if (ct.includes('text/html')) {
+          let html = '';
+          res.on('data', c => html += c);
+          res.on('end', () => {
+            try { file.close(); } catch (e) {}
+            try { if (fs.existsSync(destPath)) fs.unlinkSync(destPath); } catch (e) {}
+            const m = html.match(/action=.*[?&]confirm=([a-zA-Z0-9_-]+)/);
+            const confirmToken = m ? m[1] : 't';
+            const confirmUrl = `https://drive.google.com/uc?export=download&id=${fileId}&confirm=${confirmToken}`;
+            doDownload(confirmUrl, redirectsLeft);
+          });
+          return;
+        }
         res.pipe(file);
-        res.on('error', (e) => cleanup('Download stream error: ' + e.message));
+        res.on('error', (e) => cleanup('Stream error: ' + e.message));
         file.on('finish', () => { if (!aborted) resolve(); });
         file.on('error', (e) => cleanup('File write error: ' + e.message));
       } else {
         let d = '';
         res.on('data', c => d += c);
-        res.on('end', () => cleanup(`Drive API returned ${res.statusCode}: ${d.slice(0, 200)}`));
+        res.on('end', () => {
+          if ((res.statusCode === 403 || res.statusCode === 429) && apiKey) {
+            // Fallback to public URL
+            try { file.close(); } catch (e) {}
+            try { if (fs.existsSync(destPath)) fs.unlinkSync(destPath); } catch (e) {}
+            const publicUrl = `https://drive.google.com/uc?export=download&id=${fileId}&confirm=t`;
+            doDownload(publicUrl, 3);
+          } else {
+            cleanup(`Drive returned ${res.statusCode}: ${d.slice(0, 200)}`);
+          }
+        });
       }
-    });
-    req.on('error', (e) => cleanup('Request error: ' + e.message));
-    req.on('timeout', () => { req.destroy(); cleanup('Download timed out after 10 min'); });
+    }
+
+    if (apiKey) {
+      const url = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&key=${apiKey}`;
+      doDownload(url, 0);
+    } else {
+      const publicUrl = `https://drive.google.com/uc?export=download&id=${fileId}&confirm=t`;
+      doDownload(publicUrl, 3);
+    }
   });
 }
 

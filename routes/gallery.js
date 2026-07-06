@@ -665,9 +665,8 @@ router.get('/stream/:id', requireAuth, (req, res) => {
   // Fetch from Drive, cache locally, then serve from disk
   const tmpPath = filePath + '.downloading';
   const apiKey = process.env.GOOGLE_DRIVE_API_KEY;
-  if (!apiKey) return res.status(502).json({ error: 'Drive API key not configured' });
 
-  fetchDriveFile(item.drive_file_id, tmpPath, apiKey, (err) => {
+  const onFetched = (err) => {
     if (err) {
       try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch (e) {}
       return res.status(502).json({ error: 'Video unavailable', message: 'Could not fetch from Drive. Try again later.' });
@@ -686,7 +685,13 @@ router.get('/stream/:id', requireAuth, (req, res) => {
       }).catch(() => {});
     }
     serveFromDisk(item, filePath, req, res);
-  });
+  };
+
+  if (apiKey) {
+    fetchDriveFile(item.drive_file_id, tmpPath, apiKey, onFetched);
+  } else {
+    fetchDriveFilePublic(item.drive_file_id, tmpPath, onFetched);
+  }
 });
 
 router.get('/download/:id', requireAuth, (req, res) => {
@@ -706,9 +711,8 @@ router.get('/download/:id', requireAuth, (req, res) => {
   // Fetch from Drive, cache, then serve
   const tmpPath = filePath + '.downloading';
   const apiKey = process.env.GOOGLE_DRIVE_API_KEY;
-  if (!apiKey) return res.status(502).json({ error: 'Drive API key not configured' });
 
-  fetchDriveFile(item.drive_file_id, tmpPath, apiKey, (err) => {
+  const onFetched = (err) => {
     if (err) {
       try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch (e) {}
       return res.status(502).json({ error: 'Download unavailable', message: 'Could not fetch from Drive. Try again later.' });
@@ -718,7 +722,13 @@ router.get('/download/:id', requireAuth, (req, res) => {
       return res.status(502).json({ error: 'Download unavailable' });
     }
     res.download(filePath, filename);
-  });
+  };
+
+  if (apiKey) {
+    fetchDriveFile(item.drive_file_id, tmpPath, apiKey, onFetched);
+  } else {
+    fetchDriveFilePublic(item.drive_file_id, tmpPath, onFetched);
+  }
 });
 
 module.exports = router;
