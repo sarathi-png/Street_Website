@@ -1,14 +1,22 @@
 <%- include('../partials/header') %>
   <div class="media-view">
+    <nav class="breadcrumbs" aria-label="Breadcrumb">
+      <a href="/"><i class="fas fa-home"></i></a>
+      <span class="breadcrumb-sep">/</span>
+      <a href="/"><%= item.category_name || 'Gallery' %></a>
+      <% if (item.category_name) { %><span class="breadcrumb-sep">/</span><a href="/?category=<%= item.category_id %>"><%= item.category_name %></a><% } %>
+      <span class="breadcrumb-sep">/</span>
+      <span class="breadcrumb-current"><%= item.title.length > 40 ? item.title.slice(0, 40) + '...' : item.title %></span>
+    </nav>
     <div class="media-view-nav">
-      <a href="/" class="btn btn-secondary btn-sm"><i class="fas fa-arrow-left"></i> Gallery</a>
+      <a href="javascript:history.back()" class="btn btn-secondary btn-sm"><i class="fas fa-arrow-left"></i> Back</a>
       <% if (typeof prev !== 'undefined' && prev || typeof next !== 'undefined' && next) { %>
         <div class="media-view-nav-between">
           <% if (typeof prev !== 'undefined' && prev) { %>
-            <a href="/media/<%= prev.id %>" class="btn btn-sm"><i class="fas fa-chevron-left"></i></a>
+            <a href="/media/<%= prev.id %>" class="btn btn-sm" title="<%= prev.title %>"><i class="fas fa-chevron-left"></i></a>
           <% } %>
           <% if (typeof next !== 'undefined' && next) { %>
-            <a href="/media/<%= next.id %>" class="btn btn-sm"><i class="fas fa-chevron-right"></i></a>
+            <a href="/media/<%= next.id %>" class="btn btn-sm" title="<%= next.title %>"><i class="fas fa-chevron-right"></i></a>
           <% } %>
         </div>
       <% } %>
@@ -19,8 +27,26 @@
         <div class="media-view-img-wrapper">
           <img src="/uploads/<%= item.filename %>" alt="<%= item.title %>" class="media-view-img" id="lightboxTrigger" data-id="<%= item.id %>" data-filename="<%= item.filename %>">
         </div>
+      <% } else if (item.type === 'audio') { %>
+        <div class="media-view-video-wrapper">
+          <div class="audio-player-wrapper">
+            <div class="audio-art">
+              <i class="fas fa-music" style="font-size:4rem;color:var(--clr-primary)"></i>
+            </div>
+            <audio controls preload="metadata" class="media-view-audio" id="audioPlayer" style="width:100%">
+              <source src="/stream/<%= item.id %>" type="<%= item.mime_type || 'audio/mpeg' %>">
+              Your browser doesn't support this audio format.
+            </audio>
+          </div>
+        </div>
       <% } else { %>
         <div class="media-view-video-wrapper">
+          <% if (item.video_codec && ['hevc','h265','vp9','av1'].includes(item.video_codec)) { %>
+            <div class="codec-warning-banner">
+              <i class="fas fa-exclamation-triangle"></i>
+              <span>This video uses <strong><%= item.video_codec.toUpperCase() %></strong> codec which may not play in all browsers. <a href="/download/<%= item.id %>" class="btn btn-sm" style="margin-left:8px">Download</a></span>
+            </div>
+          <% } %>
           <video controls preload="metadata" class="media-view-video" id="videoPlayer" data-media-id="<%= item.id %>"
             <% if (typeof watchPosition !== 'undefined' && watchPosition && watchPosition.position_seconds > 0) { %>data-resume="<%= watchPosition.position_seconds %>"<% } %>>
             <source src="/stream/<%= item.id %>" type="<%= item.mime_type || 'video/mp4' %>">
@@ -30,6 +56,7 @@
             <i class="fas fa-exclamation-triangle"></i>
             <p><strong>Unable to load video</strong></p>
             <p class="video-error-detail">If this is a Drive video, ensure the file is shared as <strong>"Anyone with the link"</strong> on Google Drive.</p>
+            <p class="video-error-rate hidden" id="videoErrorRate"><i class="fas fa-clock"></i> Drive API rate limit reached. Wait a few minutes and try again.</p>
             <button class="btn btn-sm btn-secondary" onclick="document.getElementById('videoError').classList.add('hidden');document.getElementById('videoPlayer').load()">Retry</button>
           </div>
           <% if (typeof watchPosition !== 'undefined' && watchPosition && watchPosition.position_seconds > 0) { %>
@@ -50,13 +77,13 @@
       <% } %>
       <% if (typeof tags !== 'undefined' && tags && tags.length) { %>
         <div class="media-view-tags">
-          <% tags.forEach(function(t) { %><span class="media-tag media-tag-tag"><%= t %></span><% }) %>
+          <% tags.forEach(function(t) { %><a href="/?tag=<%= encodeURIComponent(t) %>" class="media-tag media-tag-tag"><%= t %></a><% }) %>
         </div>
       <% } %>
       <div class="media-view-meta">
         <% if (item.category_name) { %><span class="media-tag"><%= item.category_name %></span><% } %>
         <span><i class="fas fa-<%= item.type === 'video' ? 'video' : 'camera' %>"></i> <%= item.type %></span>
-        <span><i class="fas fa-user"></i> <%= item.uploader_name %></span>
+        <span><i class="fas fa-user"></i> <a href="/user/<%= item.uploaded_by %>" style="color:inherit;text-decoration:underline;text-underline-offset:2px"><%= item.uploader_name %></a></span>
         <span><i class="fas fa-eye"></i> <%= item.views || 0 %> views</span>
         <span><i class="fas fa-download"></i> <%= item.downloads %> downloads</span>
         <span><i class="fas fa-heart" id="likeCount"></i> <span id="likeCountNum"><%= item.likes || 0 %></span></span>
@@ -67,7 +94,16 @@
       <div class="media-view-actions">
         <button class="btn btn-sm <%= typeof liked !== 'undefined' && liked ? 'btn-primary' : 'btn-secondary' %>" id="likeBtn" data-id="<%= item.id %>"><i class="fas fa-heart"></i> <span id="likeBtnText"><%= typeof liked !== 'undefined' && liked ? 'Liked' : 'Like' %></span></button>
         <button class="btn btn-sm <%= typeof isFavorite !== 'undefined' && isFavorite ? 'btn-primary' : 'btn-secondary' %>" id="favBtn" data-id="<%= item.id %>"><i class="fas fa-star"></i> <span id="favBtnText"><%= typeof isFavorite !== 'undefined' && isFavorite ? 'Favorited' : 'Favorite' %></span></button>
-        <button class="btn btn-sm btn-secondary" id="shareBtn" data-id="<%= item.id %>"><i class="fas fa-share-alt"></i> Share</button>
+        <button class="btn btn-sm btn-secondary" id="albumBtn" data-id="<%= item.id %>"><i class="fas fa-book"></i> Album</button>
+        <div style="display:flex;gap:4px;align-items:center">
+          <select id="shareTTL" class="sort-select" style="font-size:0.75rem;padding:4px 6px;width:auto">
+            <option value="1">1 day</option>
+            <option value="7" selected>7 days</option>
+            <option value="30">30 days</option>
+            <option value="0">Never</option>
+          </select>
+          <button class="btn btn-sm btn-secondary" id="shareBtn" data-id="<%= item.id %>"><i class="fas fa-share-alt"></i> Share</button>
+        </div>
         <a href="/download/<%= item.id %>" class="btn btn-primary"><i class="fas fa-download"></i> Download</a>
       </div>
     </div>
@@ -84,8 +120,19 @@
         </div>
       </div>
     <% } %>
+
+    <div class="media-view-comments">
+      <h3><i class="fas fa-comments"></i> Comments</h3>
+      <div class="comment-form-wrapper">
+        <textarea id="commentBody" class="form-textarea" rows="2" placeholder="Write a comment..." style="margin-bottom:8px"></textarea>
+        <button class="btn btn-sm btn-primary" id="postCommentBtn" data-media-id="<%= item.id %>"><i class="fas fa-paper-plane"></i> Post</button>
+      </div>
+      <div id="commentsList" class="comments-list"></div>
+    </div>
   </div>
   <script>
+    window._userId = <%= typeof user !== 'undefined' && user ? user.id : -1 %>;
+    window._isAdmin = <%= typeof user !== 'undefined' && user && user.role === 'admin' ? 'true' : 'false' %>;
     (function() {
       var video = document.getElementById('videoPlayer');
       if (!video) return;
@@ -95,12 +142,16 @@
 
       video.addEventListener('error', function() {
         if (errorOverlay) errorOverlay.classList.remove('hidden');
+        var rateMsg = document.getElementById('videoErrorRate');
+        if (video.networkState === video.NETWORK_NO_SOURCE && rateMsg) {
+          rateMsg.classList.remove('hidden');
+        }
       });
 
       video.addEventListener('stalled', function() {
         setTimeout(function() {
           if (video.readyState < 2 && errorOverlay) errorOverlay.classList.remove('hidden');
-        }, 10000);
+        }, 15000);
       });
 
       function savePosition() {
@@ -124,5 +175,17 @@
         });
       });
     })();
+  </script>
+
+  <div id="albumPickerModal" class="modal hidden">
+    <div class="modal-overlay" id="albumPickerOverlay"></div>
+    <div class="modal-content" style="max-width:400px">
+      <h2><i class="fas fa-book"></i> Add to Album</h2>
+      <div id="albumList"></div>
+      <div class="modal-actions"><button type="button" class="btn btn-secondary" id="albumPickerClose">Close</button></div>
+    </div>
+  </div>
+  <script>
+    document.getElementById('albumPickerOverlay')?.addEventListener('click', function() { document.getElementById('albumPickerModal').classList.add('hidden'); });
   </script>
 <%- include('../partials/footer') %>

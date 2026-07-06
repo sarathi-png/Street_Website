@@ -1,5 +1,5 @@
 const express = require('express');
-const bcrypt = require('bcrypt');
+const bcrypt = require('bcryptjs');
 const multer = require('multer');
 const sharp = require('sharp');
 const path = require('path');
@@ -7,8 +7,10 @@ const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
 const { dbGet, dbAll, dbRun } = require('../db/schema');
 const https = require('https');
+const http = require('http');
 const { spawn } = require('child_process');
 const ffmpegPath = require('ffmpeg-static');
+const { generateVideoThumb, probeVideoCodec } = require('./helpers');
 
 const router = express.Router();
 
@@ -37,7 +39,7 @@ function syncMediaTags(mediaId, tagNames) {
 }
 
 const UPLOAD_MAX_SIZE = (parseInt(process.env.UPLOAD_MAX_SIZE) || 100) * 1024 * 1024;
-const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'video/mp4', 'video/webm', 'video/ogg', 'video/quicktime'];
+const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'video/mp4', 'video/webm', 'video/ogg', 'video/quicktime', 'audio/mpeg', 'audio/mp3', 'audio/flac', 'audio/wav', 'audio/ogg', 'audio/aac', 'audio/wma', 'audio/x-m4a', 'audio/mp4'];
 
 const storage = multer.diskStorage({
   destination: UPLOADS_DIR,
@@ -91,7 +93,7 @@ function downloadDriveFile(fileId, destPath, apiKey) {
     function cleanup(errMsg) {
       if (aborted) return;
       aborted = true;
-      file.close();
+      try { file.close(); } catch (e) {}
       try { if (fs.existsSync(destPath)) fs.unlinkSync(destPath); } catch (e) {}
       reject(new Error(errMsg || 'Download failed'));
     }
@@ -112,60 +114,6 @@ function downloadDriveFile(fileId, destPath, apiKey) {
   });
 }
 
-function downloadDriveFilePartial(fileId, destPath, apiKey, maxBytes) {
-  return new Promise((resolve, reject) => {
-    const url = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&key=${apiKey}`;
-    const headers = { 'User-Agent': 'StreetGallery/1.0', 'Range': `bytes=0-${maxBytes - 1}` };
-    const file = fs.createWriteStream(destPath);
-    let aborted = false;
-    let totalBytes = 0;
-    function cleanup(errMsg) {
-      if (aborted) return;
-      aborted = true;
-      file.close();
-      try { if (fs.existsSync(destPath)) fs.unlinkSync(destPath); } catch (e) {}
-      reject(new Error(errMsg || 'Partial download failed'));
-    }
-    const req = https.get(url, { headers, timeout: 120000 }, (res) => {
-      if (res.statusCode === 200 || res.statusCode === 206) {
-        res.on('data', (chunk) => {
-          totalBytes += chunk.length;
-          if (totalBytes <= maxBytes) file.write(chunk);
-        });
-        res.on('end', () => { if (!aborted) { file.end(); resolve(); } });
-        res.on('error', (e) => cleanup('Partial download stream error: ' + e.message));
-        file.on('error', (e) => cleanup('File write error: ' + e.message));
-      } else {
-        let d = '';
-        res.on('data', c => d += c);
-        res.on('end', () => cleanup(`Drive API returned ${res.statusCode}: ${d.slice(0, 200)}`));
-      }
-    });
-    req.on('error', (e) => cleanup('Request error: ' + e.message));
-    req.on('timeout', () => { req.destroy(); cleanup('Partial download timed out'); });
-  });
-}
-
-function generateVideoThumb(videoPath, thumbPath) {
-  return new Promise((resolve, reject) => {
-    const proc = spawn(ffmpegPath, [
-      '-ss', '0.01',
-      '-i', videoPath,
-      '-vframes', '1',
-      '-s', '400x300',
-      '-q:v', '2',
-      '-loglevel', 'error',
-      '-y',
-      thumbPath
-    ]);
-    proc.on('close', (code) => {
-      if (code === 0) resolve();
-      else reject(new Error(`ffmpeg exited with code ${code}`));
-    });
-    proc.on('error', reject);
-  });
-}
-
 async function importDriveFile(fileId, title, categoryId, userId, driveFileInfo, apiKey) {
   const origExt = driveFileInfo && driveFileInfo.fileExtension ? '.' + driveFileInfo.fileExtension
     : (driveFileInfo && driveFileInfo.name ? path.extname(driveFileInfo.name) : '');
@@ -175,45 +123,47 @@ async function importDriveFile(fileId, title, categoryId, userId, driveFileInfo,
   const displayTitle = title || driveName.replace(ext, '');
   const mimeType = driveFileInfo && driveFileInfo.mimeType ? driveFileInfo.mimeType : (ext === '.mp4' ? 'video/mp4' : 'image/jpeg');
   const isVideo = mimeType.startsWith('video/');
+  const isAudio = mimeType.startsWith('audio/');
 
-  if (isVideo) {
-    // Video from Drive — generate thumbnail by downloading a portion, then store metadata
-    let thumbFilename = 'thumb_' + finalFilename.replace(ext, '.jpg');
-    const tempVideoPath = path.join(UPLOADS_DIR, uuidv4() + ext);
-    try {
-      await downloadDriveFilePartial(fileId, tempVideoPath, apiKey, 50 * 1024 * 1024);
-      await generateVideoThumb(tempVideoPath, path.join(THUMBS_DIR, thumbFilename));
-    } catch (e) {
-      console.error('Drive video thumbnail generation failed:', e.message);
-      thumbFilename = null;
-    } finally {
-      try { if (fs.existsSync(tempVideoPath)) fs.unlinkSync(tempVideoPath); } catch (e) {}
-    }
-
-    dbRun(`INSERT INTO media (title, type, filename, thumbnail, file_size, mime_type, drive_file_id, category_id, uploaded_by)
-      VALUES (?, 'video', ?, ?, ?, ?, ?, ?, ?)`,
-      displayTitle, finalFilename, thumbFilename, parseInt(driveFileInfo && driveFileInfo.size) || 0,
-      mimeType, fileId, categoryId || null, userId);
+  if (isVideo || isAudio) {
+    // Video/Audio from Drive — store metadata only. Thumbnail generated lazily on first play.
+    dbRun(`INSERT INTO media (title, type, filename, thumbnail, file_size, mime_type, drive_file_id, category_id, uploaded_by, video_codec)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      displayTitle, isVideo ? 'video' : 'audio', finalFilename, null, parseInt(driveFileInfo && driveFileInfo.size) || 0,
+      mimeType, fileId, categoryId || null, userId, null);
   } else {
-    // Photo from Drive — download + generate thumbnail as before
+    // Photo from Drive — download + generate thumbnail
+    let thumbFilename = null;
+    let stat;
     const tempPath = path.join(UPLOADS_DIR, uuidv4());
-    await downloadDriveFile(fileId, tempPath, apiKey);
-    const stat = fs.statSync(tempPath);
-    const finalPath = path.join(UPLOADS_DIR, finalFilename);
-    fs.renameSync(tempPath, finalPath);
-
-    let thumbFilename = 'thumb_' + finalFilename.replace(ext, '.jpg');
     try {
-      await sharp(finalPath).resize(400, 300, { fit: 'cover' }).jpeg({ quality: 80 })
-        .toFile(path.join(THUMBS_DIR, thumbFilename));
+      await downloadDriveFile(fileId, tempPath, apiKey);
+      stat = fs.statSync(tempPath);
+      const finalPath = path.join(UPLOADS_DIR, finalFilename);
+      fs.renameSync(tempPath, finalPath);
+      thumbFilename = 'thumb_' + finalFilename.replace(ext, '.jpg');
+      try {
+        await sharp(finalPath).resize(400, 300, { fit: 'cover' }).jpeg({ quality: 80 })
+          .toFile(path.join(THUMBS_DIR, thumbFilename));
+      } catch (e) {
+        console.error('Photo thumbnail generation failed:', e.message);
+        thumbFilename = null;
+      }
     } catch (e) {
-      console.error('Thumbnail generation failed:', e.message);
-      thumbFilename = null;
+      console.error('Photo download failed:', e.message);
+      try { if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath); } catch (e2) {}
     }
 
-    dbRun(`INSERT INTO media (title, type, filename, thumbnail, file_size, mime_type, drive_file_id, category_id, uploaded_by)
-      VALUES (?, 'photo', ?, ?, ?, ?, ?, ?, ?)`,
-      displayTitle, finalFilename, thumbFilename, stat.size, mimeType, fileId, categoryId || null, userId);
+    if (stat) {
+      dbRun(`INSERT INTO media (title, type, filename, thumbnail, file_size, mime_type, drive_file_id, category_id, uploaded_by)
+        VALUES (?, 'photo', ?, ?, ?, ?, ?, ?, ?)`,
+        displayTitle, finalFilename, thumbFilename, stat.size, mimeType, fileId, categoryId || null, userId);
+    } else {
+      // Still create a record even if download failed so it can be retried
+      dbRun(`INSERT INTO media (title, type, filename, thumbnail, file_size, mime_type, drive_file_id, category_id, uploaded_by)
+        VALUES (?, 'photo', ?, ?, ?, ?, ?, ?, ?)`,
+        displayTitle, finalFilename, null, 0, mimeType, fileId, categoryId || null, userId);
+    }
   }
 }
 
@@ -237,26 +187,40 @@ router.get('/', requireAdmin, (req, res) => {
     mediaCount: dbGet('SELECT COUNT(*) as c FROM media').c,
     photoCount: dbGet("SELECT COUNT(*) as c FROM media WHERE type = 'photo'").c,
     videoCount: dbGet("SELECT COUNT(*) as c FROM media WHERE type = 'video'").c,
+    audioCount: dbGet("SELECT COUNT(*) as c FROM media WHERE type = 'audio'").c,
     categoryCount: dbGet('SELECT COUNT(*) as c FROM categories').c,
     userCount: dbGet('SELECT COUNT(*) as c FROM users').c,
     totalDownloads: dbGet('SELECT COALESCE(SUM(downloads), 0) as c FROM media').c,
     totalSize: dbGet('SELECT COALESCE(SUM(file_size), 0) as c FROM media').c,
     recentMedia: dbAll(`SELECT m.*, c.name as category_name FROM media m
-      LEFT JOIN categories c ON m.category_id = c.id ORDER BY m.created_at DESC LIMIT 10`)
+      LEFT JOIN categories c ON m.category_id = c.id ORDER BY m.created_at DESC LIMIT 10`),
+    // Analytics data
+    topMedia: dbAll(`SELECT id, title, type, views, likes, downloads FROM media
+      ORDER BY views DESC LIMIT 5`),
+    viewsByDay: dbAll(`SELECT date(created_at) as day, COUNT(*) as count,
+      SUM(views) as total_views FROM media GROUP BY date(created_at) ORDER BY day DESC LIMIT 30`),
+    mediaByCategory: dbAll(`SELECT c.name, COUNT(m.id) as count FROM categories c
+      LEFT JOIN media m ON c.id = m.category_id GROUP BY c.id ORDER BY count DESC`)
   };
   res.render('admin/dashboard', { title: 'Dashboard', stats });
 });
 
 router.get('/media', requireAdmin, (req, res) => {
+  const page = Math.max(1, parseInt(req.query.page) || 1);
+  const perPage = 25;
+  const total = dbGet('SELECT COUNT(*) as c FROM media').c;
+  const totalPages = Math.ceil(total / perPage);
+
   const media = dbAll(`SELECT m.*, c.name as category_name, u.display_name as uploader_name
     FROM media m LEFT JOIN categories c ON m.category_id = c.id
-    LEFT JOIN users u ON m.uploaded_by = u.id ORDER BY m.created_at DESC`);
+    LEFT JOIN users u ON m.uploaded_by = u.id ORDER BY m.created_at DESC LIMIT ? OFFSET ?`,
+    perPage, (page - 1) * perPage);
   const categories = dbAll('SELECT * FROM categories ORDER BY name');
 
   const tagsMap = {};
   media.forEach(m => { tagsMap[m.id] = getMediaTags(m.id); });
 
-  res.render('admin/media', { title: 'Media', media, categories, tagsMap });
+  res.render('admin/media', { title: 'Media', media, categories, tagsMap, currentPage: page, totalPages, total });
 });
 
 router.post('/media/upload', requireAdmin, upload.single('file'), async (req, res) => {
@@ -265,36 +229,40 @@ router.post('/media/upload', requireAdmin, upload.single('file'), async (req, re
     const { title, category_id, description, tags } = req.body;
     const file = req.file;
     const isVideo = file.mimetype.startsWith('video/');
-    let thumbFilename = 'thumb_' + file.filename.replace(path.extname(file.filename), '.jpg');
+    const isAudio = file.mimetype.startsWith('audio/');
+    const mediaType = isVideo ? 'video' : (isAudio ? 'audio' : 'photo');
+    let thumbFilename = isAudio ? null : ('thumb_' + file.filename.replace(path.extname(file.filename), '.jpg'));
 
     let duration = 0;
-    if (isVideo) {
+    let videoCodec = null;
+    if (isVideo || isAudio) {
       try {
         const proc = spawn(ffmpegPath, ['-i', file.path, '-show_entries', 'format=duration', '-v', 'quiet', '-of', 'csv=p=0']);
         const chunks = [];
         proc.stdout.on('data', c => chunks.push(c));
         await new Promise((resolve) => { proc.on('close', resolve); proc.on('error', resolve); });
         duration = parseFloat(Buffer.concat(chunks).toString().trim()) || 0;
+        if (isVideo) videoCodec = await probeVideoCodec(file.path);
       } catch (e) {}
     }
 
     try {
       if (isVideo) {
         await generateVideoThumb(file.path, path.join(THUMBS_DIR, thumbFilename));
-      } else {
+      } else if (!isAudio) {
         await sharp(file.path).resize(400, 300, { fit: 'cover' }).jpeg({ quality: 80 })
           .toFile(path.join(THUMBS_DIR, thumbFilename));
       }
     } catch (e) {
       console.error('Thumbnail generation failed:', e.message);
-      thumbFilename = null;
+      if (!isAudio) thumbFilename = null;
     }
 
-    dbRun(`INSERT INTO media (title, type, filename, thumbnail, file_size, mime_type, description, duration, category_id, uploaded_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    dbRun(`INSERT INTO media (title, type, filename, thumbnail, file_size, mime_type, description, duration, category_id, uploaded_by, video_codec)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       title || file.originalname.replace(path.extname(file.originalname), ''),
-      isVideo ? 'video' : 'photo', file.filename, thumbFilename, file.size, file.mimetype,
-      description || '', duration, category_id || null, req.session.user.id);
+      mediaType, file.filename, thumbFilename, file.size, file.mimetype,
+      description || '', duration, category_id || null, req.session.user.id, videoCodec);
 
     const newMedia = dbGet('SELECT id FROM media ORDER BY id DESC LIMIT 1');
     if (newMedia && tags) syncMediaTags(newMedia.id, tags.split(',').map(t => t.trim()));
@@ -331,29 +299,47 @@ router.post('/media/import-drive', requireAdmin, async (req, res) => {
       const userId = req.session.user.id;
 
       function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
+      function jitter(ms) { return ms + Math.random() * 1000; }
 
       setImmediate(async () => {
-        for (const f of allFiles) {
-          let ok = false;
-          for (let attempt = 0; attempt <= 1 && !ok; attempt++) {
-            if (attempt > 0) await delay(1000);
-            try {
-              await importDriveFile(f.id, title ? title + ' - ' + f.name : f.name, category_id, userId, f, apiKey);
-              ok = true;
-            } catch (e) {
-              const msg = `${f.name}: ${e.message}`;
-              console.error('Failed:', msg);
-              importJobs[jobId].lastError = msg;
-              if (attempt === 1) importJobs[jobId].errors++;
-            }
+        const CONCURRENCY = 3;
+        const queue = [...allFiles];
+        let active = 0;
+
+        async function processNext() {
+          while (queue.length > 0 && active < CONCURRENCY) {
+            const f = queue.shift();
+            active++;
+            (async () => {
+              let ok = false;
+              const backoffs = [1000, 3000, 5000];
+              for (let attempt = 0; attempt <= 2 && !ok; attempt++) {
+                if (attempt > 0) await delay(jitter(backoffs[attempt - 1]));
+                try {
+                  await importDriveFile(f.id, title ? title + ' - ' + f.name : f.name, category_id, userId, f, apiKey);
+                  ok = true;
+                } catch (e) {
+                  const msg = `${f.name}: ${e.message}`;
+                  console.error('Failed attempt ' + (attempt + 1) + ':', msg);
+                  importJobs[jobId].lastError = msg;
+                }
+              }
+              if (!ok) importJobs[jobId].errors++;
+              importJobs[jobId].current++;
+              active--;
+              processNext();
+            })();
+            await delay(200);
           }
-          importJobs[jobId].current++;
-          await delay(500);
+          if (active === 0 && queue.length === 0) {
+            const ok = importJobs[jobId].current - importJobs[jobId].errors;
+            importJobs[jobId].done = true;
+            importJobs[jobId].message = `Imported ${ok} of ${importJobs[jobId].total} files`;
+            setTimeout(() => { delete importJobs[jobId]; }, 120000);
+          }
         }
-        const ok = importJobs[jobId].current - importJobs[jobId].errors;
-        importJobs[jobId].done = true;
-        importJobs[jobId].message = `Imported ${ok} of ${importJobs[jobId].total} files`;
-        setTimeout(() => { delete importJobs[jobId]; }, 120000);
+
+        processNext();
       });
 
       return res.json({ jobId });
@@ -369,6 +355,90 @@ router.post('/media/import-drive', requireAdmin, async (req, res) => {
   } catch (err) {
     console.error('Drive import error:', err);
     return res.status(500).json({ error: 'Import failed: ' + err.message });
+  }
+});
+
+function downloadFromUrl(url) {
+  return new Promise((resolve, reject) => {
+    const parsedUrl = new URL(url);
+    const mod = parsedUrl.protocol === 'https:' ? https : http;
+    mod.get(url, { headers: { 'User-Agent': 'StreetGallery/1.0' }, timeout: 600000 }, (res) => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        res.resume();
+        return downloadFromUrl(res.headers.location).then(resolve).catch(reject);
+      }
+      if (res.statusCode !== 200) {
+        res.resume();
+        return reject(new Error('URL returned ' + res.statusCode));
+      }
+      const contentType = res.headers['content-type'] || '';
+      const chunks = [];
+      res.on('data', c => chunks.push(c));
+      res.on('end', () => resolve({ data: Buffer.concat(chunks), contentType }));
+      res.on('error', reject);
+    }).on('error', reject);
+  });
+}
+
+router.post('/media/import-url', requireAdmin, async (req, res) => {
+  try {
+    const { url, title, category_id, tags } = req.body;
+    if (!url) return res.status(400).json({ error: 'URL required' });
+
+    const { data, contentType } = await downloadFromUrl(url);
+    const ext = path.extname(new URL(url).pathname) || '.bin';
+    const finalFilename = uuidv4() + ext;
+
+    const mimeType = contentType || 'application/octet-stream';
+    const isVideo = mimeType.startsWith('video/');
+    const isAudio = mimeType.startsWith('audio/');
+    const mediaType = isVideo ? 'video' : (isAudio ? 'audio' : 'photo');
+
+    const filePath = path.join(UPLOADS_DIR, finalFilename);
+    fs.writeFileSync(filePath, data);
+
+    let thumbFilename = null;
+    if (!isAudio) {
+      thumbFilename = 'thumb_' + finalFilename.replace(ext, '.jpg');
+      try {
+        if (isVideo) {
+          await generateVideoThumb(filePath, path.join(THUMBS_DIR, thumbFilename));
+        } else {
+          await sharp(filePath).resize(400, 300, { fit: 'cover' }).jpeg({ quality: 80 })
+            .toFile(path.join(THUMBS_DIR, thumbFilename));
+        }
+      } catch (e) {
+        console.error('URL import thumbnail failed:', e.message);
+        thumbFilename = null;
+      }
+    }
+
+    let duration = 0;
+    let videoCodec = null;
+    if (isVideo || isAudio) {
+      try {
+        const proc = spawn(ffmpegPath, ['-i', filePath, '-show_entries', 'format=duration', '-v', 'quiet', '-of', 'csv=p=0']);
+        const chunks = [];
+        proc.stdout.on('data', c => chunks.push(c));
+        await new Promise((resolve) => { proc.on('close', resolve); proc.on('error', resolve); });
+        duration = parseFloat(Buffer.concat(chunks).toString().trim()) || 0;
+        if (isVideo) videoCodec = await probeVideoCodec(filePath);
+      } catch (e) {}
+    }
+
+    dbRun(`INSERT INTO media (title, type, filename, thumbnail, file_size, mime_type, description, duration, category_id, uploaded_by, video_codec)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      title || path.basename(new URL(url).pathname) || 'Imported from URL',
+      mediaType, finalFilename, thumbFilename, data.length, mimeType,
+      '', duration, category_id || null, req.session.user.id, videoCodec);
+
+    const newMedia = dbGet('SELECT id FROM media ORDER BY id DESC LIMIT 1');
+    if (newMedia && tags) syncMediaTags(newMedia.id, tags.split(',').map(t => t.trim()));
+
+    res.json({ success: true, message: 'Imported successfully' });
+  } catch (err) {
+    console.error('URL import error:', err);
+    res.status(500).json({ error: 'Import failed: ' + err.message });
   }
 });
 
@@ -491,40 +561,63 @@ router.post('/users/reset-password/:id', requireAdmin, (req, res) => {
 });
 
 router.post('/media/regenerate-thumbnails', requireAdmin, async (req, res) => {
-  const apiKey = process.env.GOOGLE_DRIVE_API_KEY;
   const videos = dbAll("SELECT * FROM media WHERE type = 'video' AND (thumbnail IS NULL OR thumbnail = '')");
-  if (!videos.length) return res.json({ success: 0, failed: 0, message: 'No videos need thumbnails' });
+  const localVideos = videos.filter(item => fs.existsSync(path.join(UPLOADS_DIR, item.filename)));
+  const uncachedCount = videos.length - localVideos.length;
+
+  if (!localVideos.length) {
+    const msg = uncachedCount > 0
+      ? `No locally-cached videos need thumbnails (${uncachedCount} uncached — play them first to cache)`
+      : 'No videos need thumbnails';
+    return res.json({ success: 0, failed: 0, skipped: 0, total: videos.length, message: msg });
+  }
 
   let success = 0, failed = 0, lastError = '';
-  for (const item of videos) {
-    let tempVideoPath = null;
+  for (const item of localVideos) {
     try {
-      const ext = item.filename ? path.extname(item.filename) : '.mp4';
-      tempVideoPath = path.join(UPLOADS_DIR, uuidv4() + ext);
-
-      if (item.drive_file_id && apiKey) {
-        await downloadDriveFilePartial(item.drive_file_id, tempVideoPath, apiKey, 50 * 1024 * 1024);
-      } else {
-        const localPath = path.join(UPLOADS_DIR, item.filename);
-        if (!fs.existsSync(localPath)) { failed++; continue; }
-        tempVideoPath = localPath;
-      }
-
       const thumbFilename = 'thumb_' + item.id + '.jpg';
-      await generateVideoThumb(tempVideoPath, path.join(THUMBS_DIR, thumbFilename));
-      dbRun('UPDATE media SET thumbnail = ? WHERE id = ?', thumbFilename, item.id);
+      await generateVideoThumb(path.join(UPLOADS_DIR, item.filename), path.join(THUMBS_DIR, thumbFilename));
+      const codec = await probeVideoCodec(path.join(UPLOADS_DIR, item.filename));
+      dbRun('UPDATE media SET thumbnail = ?, video_codec = ? WHERE id = ?', thumbFilename, codec, item.id);
       success++;
     } catch (e) {
-      console.error(`Thumbnail regen failed for media ${item.id}:`, e.message);
+      console.error('Thumbnail regen failed for media ' + item.id + ':', e.message);
       failed++;
       lastError = e.message;
-    } finally {
-      try {
-        if (tempVideoPath && fs.existsSync(tempVideoPath) && item.drive_file_id) fs.unlinkSync(tempVideoPath);
-      } catch (e) {}
     }
   }
-  res.json({ success, failed, total: videos.length, lastError });
+
+  let msg = 'Generated ' + success + ' thumbnail' + (success !== 1 ? 's' : '');
+  if (failed) msg += ', ' + failed + ' failed';
+  if (uncachedCount) msg += ', ' + uncachedCount + ' skipped (play video first to cache)';
+  res.json({ success, failed, skipped: uncachedCount, total: videos.length, message: msg, lastError });
+});
+
+router.post('/media/fix-drive-thumbnails', requireAdmin, async (req, res) => {
+  const videos = dbAll("SELECT * FROM media WHERE type = 'video' AND (thumbnail IS NULL OR thumbnail = '')");
+  if (!videos.length) return res.json({ success: 0, failed: 0, message: 'No Drive-imported videos need thumbnails' });
+
+  let success = 0, failed = 0, skipped = 0, lastError = '';
+  for (const item of videos) {
+    const localPath = path.join(UPLOADS_DIR, item.filename);
+    if (!fs.existsSync(localPath)) { skipped++; continue; }
+    try {
+      const thumbFilename = 'thumb_' + item.id + '.jpg';
+      await generateVideoThumb(localPath, path.join(THUMBS_DIR, thumbFilename));
+      const codec = await probeVideoCodec(localPath);
+      dbRun('UPDATE media SET thumbnail = ?, video_codec = ? WHERE id = ?', thumbFilename, codec, item.id);
+      success++;
+    } catch (e) {
+      console.error('Drive thumbnail fix failed for media ' + item.id + ':', e.message);
+      failed++;
+      lastError = e.message;
+    }
+  }
+
+  let msg = 'Fixed ' + success + ' Drive thumbnail' + (success !== 1 ? 's' : '');
+  if (failed) msg += ', ' + failed + ' failed';
+  if (skipped) msg += ', ' + skipped + ' not cached from Drive yet (play video first)';
+  res.json({ success, failed, skipped, total: videos.length, message: msg, lastError });
 });
 
 router.use((err, req, res, next) => {

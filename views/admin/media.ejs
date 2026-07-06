@@ -10,7 +10,16 @@
     <div class="upload-section">
       <h2 class="section-title"><i class="fas fa-cloud-upload-alt"></i> Upload File</h2>
       <form method="POST" action="/admin/media/upload" enctype="multipart/form-data" class="upload-form" id="uploadForm">
-        <div class="form-group"><label for="file"><i class="fas fa-file"></i> File</label><input type="file" id="file" name="file" required class="form-file"><span style="font-size:0.8rem;color:var(--clr-text-muted);margin-top:4px;display:block">JPEG, PNG, WebP, GIF, MP4, WebM — max <%= process.env.UPLOAD_MAX_SIZE || 100 %>MB</span></div>
+        <div class="form-group"><label for="file"><i class="fas fa-file"></i> File</label>
+          <div class="drop-zone" id="dropZone">
+            <div class="drop-zone-content">
+              <i class="fas fa-cloud-upload-alt" style="font-size:2rem;color:var(--clr-primary);margin-bottom:8px"></i>
+              <p><strong>Drop files here</strong> or click to browse</p>
+              <span style="font-size:0.8rem;color:var(--clr-text-muted)">JPEG, PNG, WebP, GIF, MP4, WebM, Audio — max <%= process.env.UPLOAD_MAX_SIZE || 100 %>MB</span>
+            </div>
+            <input type="file" id="file" name="file" required class="form-file drop-zone-input" multiple>
+          </div>
+        </div>
         <div class="form-group"><label for="title"><i class="fas fa-heading"></i> Title</label><input type="text" id="title" name="title" placeholder="Leave blank to use filename"></div>
         <div class="form-group"><label for="description"><i class="fas fa-align-left"></i> Description</label><textarea id="description" name="description" rows="2" placeholder="Optional description" class="form-textarea"></textarea></div>
         <div class="form-group"><label for="tags"><i class="fas fa-tags"></i> Tags</label><input type="text" id="tags" name="tags" placeholder="Comma-separated: nature, sunset, street"></div>
@@ -25,6 +34,25 @@
           <span id="uploadProgressText" style="font-size:0.8rem;color:var(--clr-text-muted)"></span>
         </div>
       </form>
+    </div>
+
+    <div class="upload-section">
+      <h2 class="section-title"><i class="fas fa-link"></i> Import from URL</h2>
+      <p style="font-size:0.85rem;color:var(--clr-text-muted);margin-bottom:16px">Import media from any public URL (images, videos, audio).</p>
+      <form method="POST" action="/admin/media/import-url" class="upload-form" id="urlImportForm">
+        <div class="form-group"><label for="import_url"><i class="fas fa-link"></i> Media URL</label><input type="url" id="import_url" name="url" placeholder="https://example.com/photo.jpg" required></div>
+        <div class="form-group"><label for="url_title"><i class="fas fa-heading"></i> Title</label><input type="text" id="url_title" name="title" placeholder="Leave blank to use filename"></div>
+        <div class="form-group"><label for="url_tags"><i class="fas fa-tags"></i> Tags</label><input type="text" id="url_tags" name="tags" placeholder="Comma-separated tags"></div>
+        <div class="form-group"><label for="url_category_id"><i class="fas fa-tag"></i> Category</label>
+          <select id="url_category_id" name="category_id"><option value="">No category</option>
+            <% (typeof categories !== 'undefined' ? categories : []).forEach(function(cat) { %><option value="<%= cat.id %>"><%= cat.name %></option><% }) %>
+          </select>
+        </div>
+        <button type="submit" class="btn btn-primary" id="urlImportBtn"><i class="fas fa-cloud-download-alt"></i> Import from URL</button>
+      </form>
+      <div id="urlImportProgress" class="hidden" style="margin-top:12px">
+        <span style="font-size:0.9rem"><i class="fas fa-spinner fa-spin"></i> Downloading...</span>
+      </div>
     </div>
 
     <div class="upload-section">
@@ -54,6 +82,7 @@
       <h2 class="section-title" style="margin:0"><i class="fas fa-list"></i> All Media</h2>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <button type="button" class="btn btn-sm btn-secondary" id="regenThumbBtn" onclick="regenThumbnails()"><i class="fas fa-sync-alt"></i> Regenerate Thumbnails</button>
+        <button type="button" class="btn btn-sm btn-warning" id="regenFailedBtn" onclick="regenFailedThumbnails()"><i class="fas fa-exclamation-triangle"></i> Fix Drive Thumbnails</button>
         <form method="POST" action="/admin/media/bulk-move" id="bulkForm" style="display:none;align-items:center;gap:8px">
           <span id="bulkCount">0 selected</span>
           <select name="category_id" id="bulkCategorySelect"><option value="">Move to category...</option>
@@ -97,6 +126,13 @@
         </tbody>
       </table>
     </div>
+    <% if (typeof totalPages !== 'undefined' && totalPages > 1) { %>
+      <div class="pagination" style="margin-top:16px">
+        <% if (currentPage > 1) { %><a href="/admin/media?page=<%= currentPage - 1 %>" class="btn btn-sm btn-secondary"><i class="fas fa-chevron-left"></i> Prev</a><% } %>
+        <span class="pagination-info">Page <%= currentPage %> of <%= totalPages %> (<%= total %> total)</span>
+        <% if (currentPage < totalPages) { %><a href="/admin/media?page=<%= currentPage + 1 %>" class="btn btn-sm btn-secondary">Next <i class="fas fa-chevron-right"></i></a><% } %>
+      </div>
+    <% } %>
   </div>
 
   <div id="editModal" class="modal hidden">
@@ -126,18 +162,30 @@
         .then(function(d) {
           btn.disabled = false;
           btn.innerHTML = '<i class="fas fa-sync-alt"></i> Regenerate Thumbnails';
-          if (d.success > 0) {
-            showToast('Regenerated ' + d.success + ' thumbnail' + (d.success !== 1 ? 's' : ''), 'success');
-            setTimeout(function() { location.reload(); }, 1000);
-          } else if (d.failed > 0) {
-            showToast(d.failed + ' failed — ' + d.lastError, 'error');
-          } else {
-            showToast('No videos need thumbnails', 'success');
-          }
+          showToast(d.message, d.failed ? 'error' : 'success');
+          if (d.success > 0) setTimeout(function() { location.reload(); }, 1000);
         })
         .catch(function(e) {
           btn.disabled = false;
           btn.innerHTML = '<i class="fas fa-sync-alt"></i> Regenerate Thumbnails';
+          showToast('Regeneration failed: ' + e.message, 'error');
+        });
+    }
+    function regenFailedThumbnails() {
+      var btn = document.getElementById('regenFailedBtn');
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Fixing...';
+      fetch('/admin/media/fix-drive-thumbnails', { method: 'POST' })
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+          btn.disabled = false;
+          btn.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Fix Drive Thumbnails';
+          showToast(d.message, d.failed ? 'error' : 'success');
+          if (d.success > 0) setTimeout(function() { location.reload(); }, 1000);
+        })
+        .catch(function(e) {
+          btn.disabled = false;
+          btn.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Fix Drive Thumbnails';
           showToast('Regeneration failed: ' + e.message, 'error');
         });
     }

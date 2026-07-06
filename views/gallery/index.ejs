@@ -9,8 +9,13 @@
       <a href="/<%= currentType ? '?type=' + currentType + '&' : '' %><%= currentSort !== 'newest' ? 'sort=' + currentSort : '' %>" class="filter-chip <%= !currentCategory && !currentType ? 'active' : '' %>"><i class="fas fa-th"></i> All</a>
       <a href="/?type=photo<%= currentCategory ? '&category=' + currentCategory : '' %><%= currentSort !== 'newest' ? '&sort=' + currentSort : '' %>" class="filter-chip <%= currentType === 'photo' ? 'active' : '' %>"><i class="fas fa-camera"></i> Photos</a>
       <a href="/?type=video<%= currentCategory ? '&category=' + currentCategory : '' %><%= currentSort !== 'newest' ? '&sort=' + currentSort : '' %>" class="filter-chip <%= currentType === 'video' ? 'active' : '' %>"><i class="fas fa-video"></i> Videos</a>
+      <a href="/?type=audio<%= currentCategory ? '&category=' + currentCategory : '' %><%= currentSort !== 'newest' ? '&sort=' + currentSort : '' %>" class="filter-chip <%= currentType === 'audio' ? 'active' : '' %>"><i class="fas fa-music"></i> Audio</a>
       <a href="/favorites" class="filter-chip <%= typeof isFavoritesPage !== 'undefined' && isFavoritesPage ? 'active' : '' %>"><i class="fas fa-heart"></i> Favorites</a>
       <a href="/watch-later" class="filter-chip <%= typeof isWatchLaterPage !== 'undefined' && isWatchLaterPage ? 'active' : '' %>"><i class="fas fa-clock"></i> Continue</a>
+      <a href="/?thisday=1<%= currentType ? '&type=' + currentType : '' %>" class="filter-chip <%= typeof thisDayActive !== 'undefined' && thisDayActive ? 'active' : '' %>"><i class="fas fa-calendar-day"></i> This Day</a>
+      <% if (typeof currentTag !== 'undefined' && currentTag) { %>
+        <a href="/<%= currentType ? '?type=' + currentType : '' %><%= currentCategory ? (currentType ? '&' : '?') + 'category=' + currentCategory : '' %>" class="filter-chip active"><i class="fas fa-tag"></i> #<%= currentTag %> <span style="margin-left:6px;opacity:0.7">&times;</span></a>
+      <% } %>
     </div>
     <div class="gallery-controls-row">
       <div class="category-filters">
@@ -48,15 +53,42 @@
   </div>
 
   <% if (typeof total !== 'undefined' && total > 0) { %>
-    <div class="results-info"><%= total %> item<%= total !== 1 ? 's' : '' %> found</div>
+    <div class="results-info">
+      Showing <%= (currentPage - 1) * 24 + 1 %>–<%= Math.min(currentPage * 24, total) %> of <%= total %> item<%= total !== 1 ? 's' : '' %>
+    </div>
   <% } %>
 
   <% if ((typeof media !== 'undefined' ? media : []).length === 0) { %>
     <div class="empty-state">
       <i class="fas fa-photo-video"></i>
-      <p><%= typeof isFavoritesPage !== 'undefined' && isFavoritesPage ? 'No favorites yet — click the heart on any media to add it' : typeof isWatchLaterPage !== 'undefined' && isWatchLaterPage ? 'No continue watching — play a video to start tracking' : 'No media found in this collection yet' %></p>
-      <% if (typeof user !== 'undefined' && user && user.role === 'admin' && typeof isFavoritesPage === 'undefined') { %>
-        <a href="/admin/media" class="btn btn-primary"><i class="fas fa-upload"></i> Upload Media</a>
+      <% if (typeof isFavoritesPage !== 'undefined' && isFavoritesPage) { %>
+        <p><strong>No favorites yet</strong></p>
+        <p style="font-size:0.9rem">Click the <i class="fas fa-heart" style="color:var(--clr-danger)"></i> icon on any media to add it to your favorites.</p>
+        <a href="/" class="btn btn-primary" style="margin-top:12px"><i class="fas fa-images"></i> Browse Gallery</a>
+      <% } else if (typeof isWatchLaterPage !== 'undefined' && isWatchLaterPage) { %>
+        <p><strong>No videos in progress</strong></p>
+        <p style="font-size:0.9rem">Play a video and your progress will be saved automatically.</p>
+        <a href="/" class="btn btn-primary" style="margin-top:12px"><i class="fas fa-video"></i> Browse Videos</a>
+      <% } else if (typeof isProfilePage !== 'undefined' && isProfilePage) { %>
+        <p><strong>No uploads yet</strong></p>
+        <p style="font-size:0.9rem">This member hasn't uploaded any media yet.</p>
+      <% } else if (typeof search !== 'undefined' && search) { %>
+        <p><strong>No results for "<%= search %>"</strong></p>
+        <p style="font-size:0.9rem">Try different keywords or browse the gallery.</p>
+        <a href="/" class="btn btn-secondary" style="margin-top:12px"><i class="fas fa-times"></i> Clear Search</a>
+      <% } else if (typeof currentTag !== 'undefined' && currentTag) { %>
+        <p><strong>No media tagged "<%= currentTag %>"</strong></p>
+        <p style="font-size:0.9rem">No items have this tag yet.</p>
+        <a href="/" class="btn btn-secondary" style="margin-top:12px"><i class="fas fa-times"></i> Clear Tag Filter</a>
+      <% } else if (typeof thisDayActive !== 'undefined' && thisDayActive) { %>
+        <p><strong>Nothing on this day</strong></p>
+        <p style="font-size:0.9rem">No media was uploaded on this date in previous years.</p>
+      <% } else { %>
+        <p><strong>No media found</strong></p>
+        <p style="font-size:0.9rem">This collection is empty.</p>
+        <% if (typeof user !== 'undefined' && user && user.role === 'admin') { %>
+          <a href="/admin/media" class="btn btn-primary" style="margin-top:12px"><i class="fas fa-upload"></i> Upload Media</a>
+        <% } %>
       <% } %>
     </div>
   <% } else { %>
@@ -68,13 +100,15 @@
               <img src="/thumbnails/<%= item.thumbnail %>" alt="<%= item.title %>" loading="lazy">
             <% } else if (item.type === 'photo') { %>
               <img src="/uploads/<%= item.filename %>" alt="<%= item.title %>" loading="lazy">
+            <% } else if (item.type === 'audio') { %>
+              <div class="media-card-placeholder"><i class="fas fa-music"></i></div>
             <% } else { %>
               <div class="media-card-placeholder"><i class="fas fa-video"></i></div>
             <% } %>
             <% if (typeof item.progress !== 'undefined' && item.progress > 0) { %>
               <div class="progress-bar"><div class="progress-fill" style="width:<%= item.progress %>%"></div></div>
             <% } %>
-            <div class="play-badge"><i class="fas fa-<%= item.type === 'video' ? 'play' : 'expand' %>"></i></div>
+            <div class="play-badge"><i class="fas fa-<%= item.type === 'video' ? 'play' : (item.type === 'audio' ? 'headphones' : 'expand') %>"></i></div>
             <button class="fav-btn <%= item.isFavorite ? 'fav-active' : '' %>" data-fav-id="<%= item.id %>" onclick="event.preventDefault();event.stopPropagation();toggleFavorite(<%= item.id %>,this)">
               <i class="fas fa-heart"></i>
             </button>
@@ -91,8 +125,11 @@
             <% if (item.description) { %><p class="media-card-desc"><%= item.description.length > 60 ? item.description.slice(0, 60) + '...' : item.description %></p><% } %>
             <div class="media-card-meta">
               <% if (item.category_name) { %><span class="media-tag"><%= item.category_name %></span><% } %>
-              <% if (item.tags && item.tags.length) { %><% item.tags.slice(0,2).forEach(function(t) { %><span class="media-tag media-tag-tag"><%= t %></span><% }) %><% } %>
-              <span class="media-type-badge"><i class="fas fa-<%= item.type === 'video' ? 'video' : 'camera' %>"></i> <%= item.type %></span>
+              <% if (item.tags && item.tags.length) { %><% item.tags.slice(0,2).forEach(function(t) { %><a href="/?tag=<%= encodeURIComponent(t) %><%= currentCategory ? '&category=' + currentCategory : '' %><%= currentType ? '&type=' + currentType : '' %>" class="media-tag media-tag-tag" onclick="event.stopPropagation()"><%= t %></a><% }) %><% } %>
+              <span class="media-type-badge"><i class="fas fa-<%= item.type === 'video' ? 'video' : (item.type === 'audio' ? 'music' : 'camera') %>"></i> <%= item.type %></span>
+              <% if (item.video_codec) { %>
+                <span class="media-tag media-tag-codec <%= ['hevc','h265'].includes(item.video_codec) ? 'codec-warn' : '' %>"><%= item.video_codec.toUpperCase() %></span>
+              <% } %>
               <% if (item.drive_file_id) { %><span class="media-tag" style="background:var(--clr-primary-light);color:var(--clr-primary);font-size:0.65rem"><i class="fab fa-google-drive"></i></span><% } %>
               <span class="media-stat"><i class="fas fa-eye"></i> <%= item.views || 0 %></span>
               <span class="media-stat"><i class="fas fa-heart"></i> <%= item.likes || 0 %></span>

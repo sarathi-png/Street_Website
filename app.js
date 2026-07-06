@@ -4,6 +4,7 @@ const session = require('express-session');
 const rateLimit = require('express-rate-limit');
 const path = require('path');
 const fs = require('fs');
+const helmet = require('helmet');
 const { initDb } = require('./db/schema');
 
 const app = express();
@@ -13,6 +14,8 @@ const PORT = process.env.PORT || 3000;
 app.set('trust proxy', 1);
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
+
+app.use(helmet({ contentSecurityPolicy: false }));
 
 const UPLOADS_DIR = process.env.UPLOADS_DIR || process.env.RAILWAY_VOLUME_MOUNT_PATH
   ? path.join(process.env.RAILWAY_VOLUME_MOUNT_PATH || '/data', 'uploads')

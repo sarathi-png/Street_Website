@@ -8,6 +8,12 @@ document.addEventListener('DOMContentLoaded', function () {
   initSlideshow();
   initBulkSelect();
   initUploadProgress();
+  initComments();
+  initAlbumPicker();
+  initImageFade();
+  initBackToTop();
+  initNavToggle();
+  initDropZone();
 });
 
 function initTheme() {
@@ -15,13 +21,46 @@ function initTheme() {
   if (!toggle) return;
   var saved = localStorage.getItem('theme') || 'light';
   document.documentElement.setAttribute('data-theme', saved);
-  toggle.textContent = saved === 'dark' ? '☀️' : '🌙';
+  toggle.innerHTML = saved === 'dark' ? '<i class="fas fa-sun"></i>' : '<i class="fas fa-moon"></i>';
   toggle.addEventListener('click', function () {
     var cur = document.documentElement.getAttribute('data-theme');
     var next = cur === 'dark' ? 'light' : 'dark';
     document.documentElement.setAttribute('data-theme', next);
     localStorage.setItem('theme', next);
-    toggle.textContent = next === 'dark' ? '☀️' : '🌙';
+    toggle.innerHTML = next === 'dark' ? '<i class="fas fa-sun"></i>' : '<i class="fas fa-moon"></i>';
+  });
+}
+
+function initImageFade() {
+  document.querySelectorAll('.media-card-img img').forEach(function(img) {
+    if (img.complete) { img.classList.add('loaded'); return; }
+    img.addEventListener('load', function() { img.classList.add('loaded'); });
+    img.addEventListener('error', function() { img.classList.add('loaded'); });
+  });
+}
+
+function initBackToTop() {
+  var btn = document.createElement('button');
+  btn.className = 'back-to-top';
+  btn.innerHTML = '<i class="fas fa-arrow-up"></i>';
+  btn.setAttribute('aria-label', 'Back to top');
+  document.body.appendChild(btn);
+  window.addEventListener('scroll', function() {
+    btn.classList.toggle('visible', window.scrollY > window.innerHeight);
+  });
+  btn.addEventListener('click', function() { window.scrollTo({ top: 0, behavior: 'smooth' }); });
+}
+
+function initNavToggle() {
+  var toggle = document.getElementById('navToggle');
+  var links = document.querySelector('.nav-links');
+  if (!toggle || !links) return;
+  toggle.addEventListener('click', function() {
+    links.classList.toggle('open');
+    toggle.innerHTML = links.classList.contains('open') ? '<i class="fas fa-times"></i>' : '<i class="fas fa-bars"></i>';
+  });
+  document.addEventListener('click', function(e) {
+    if (!e.target.closest('.nav')) links.classList.remove('open');
   });
 }
 
@@ -178,7 +217,7 @@ function initDriveImport() {
     btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Listing...';
     progress.classList.add('hidden');
 
-    fetch(form.action, { method: 'POST', body: JSON.stringify(Object.fromEntries(fd)), headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' } })
+    fetch(form.action, { method: 'POST', body: new URLSearchParams(fd), headers: { 'Accept': 'application/json' } })
       .then(function (r) { return r.json(); })
       .then(function (data) {
         if (data.error) { showToast(data.error, 'error'); btn.disabled = false; btn.innerHTML = '<i class="fab fa-google-drive"></i> Import from Drive'; return; }
@@ -228,6 +267,121 @@ function showToast(msg, type) {
   setTimeout(function () { if (toast.parentNode) toast.parentNode.removeChild(toast); }, 5000);
 }
 
+function initComments() {
+  var list = document.getElementById('commentsList');
+  var btn = document.getElementById('postCommentBtn');
+  if (!list || !btn) return;
+  var mediaId = btn.getAttribute('data-media-id');
+
+  function loadComments() {
+    fetch('/comments/' + mediaId)
+      .then(function(r) { return r.json(); })
+      .then(function(comments) {
+        list.innerHTML = '';
+        if (!comments.length) { list.innerHTML = '<p style="color:var(--clr-text-muted)">No comments yet. Be the first!</p>'; return; }
+        comments.forEach(function(c) { list.appendChild(renderComment(c, 0)); });
+      });
+  }
+
+  function timeAgo(dateStr) {
+    var diff = (Date.now() - new Date(dateStr).getTime()) / 1000;
+    if (diff < 60) return 'just now';
+    if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+    if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+    if (diff < 604800) return Math.floor(diff / 86400) + 'd ago';
+    return new Date(dateStr).toLocaleDateString('en-IN', { month: 'short', day: 'numeric' });
+  }
+
+  function renderComment(c, depth) {
+    var div = document.createElement('div');
+    div.className = 'comment';
+    var date = timeAgo(c.created_at);
+    var canDelete = c.user_id === (window._userId || -1) || (window._isAdmin || false);
+    div.innerHTML = '<div class="comment-header"><strong>' + esc(c.user_name) + '</strong><span>' + date + (canDelete ? ' <button class="comment-delete-btn" data-id="' + c.id + '" title="Delete">&times;</button>' : '') + '</span></div>' +
+      '<div class="comment-body">' + esc(c.body) + '</div>' +
+      '<button class="comment-reply-btn" data-id="' + c.id + '">Reply</button>' +
+      '<div class="comment-replies" id="replies-' + c.id + '"></div>';
+    var repliesContainer = div.querySelector('.comment-replies');
+    (c.replies || []).forEach(function(r) { repliesContainer.appendChild(renderComment(r, depth + 1)); });
+
+    div.querySelector('.comment-reply-btn').addEventListener('click', function() {
+      var existing = div.querySelector('.comment-reply-form');
+      if (existing) { existing.remove(); return; }
+      var form = document.createElement('div');
+      form.className = 'comment-reply-form';
+      form.innerHTML = '<input type="text" placeholder="Write a reply..." class="reply-input"><button class="btn btn-sm btn-primary reply-submit">Reply</button>';
+      div.appendChild(form);
+      form.querySelector('.reply-submit').addEventListener('click', function() {
+        var input = form.querySelector('.reply-input');
+        if (!input.value.trim()) return;
+        fetch('/comment/' + mediaId, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({body: input.value.trim(), parent_id: c.id}) })
+          .then(function(r) { return r.json(); })
+          .then(function() { form.remove(); loadComments(); });
+      });
+    });
+
+    var delBtn = div.querySelector('.comment-delete-btn');
+    if (delBtn) delBtn.addEventListener('click', function() {
+      if (confirm('Delete this comment?')) {
+        fetch('/comment/' + c.id + '/delete', { method: 'POST' })
+          .then(function(r) { return r.json(); })
+          .then(function(d) { if (d.success) loadComments(); });
+      }
+    });
+
+    return div;
+  }
+
+  function esc(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+  btn.addEventListener('click', function() {
+    var body = document.getElementById('commentBody');
+    if (!body.value.trim()) return;
+    fetch('/comment/' + mediaId, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({body: body.value.trim()}) })
+      .then(function(r) { return r.json(); })
+      .then(function() { body.value = ''; loadComments(); });
+  });
+
+  loadComments();
+}
+
+function initAlbumPicker() {
+  var albumBtn = document.getElementById('albumBtn');
+  var modal = document.getElementById('albumPickerModal');
+  if (!albumBtn || !modal) return;
+  albumBtn.addEventListener('click', function() {
+    var mediaId = albumBtn.getAttribute('data-id');
+    var list = document.getElementById('albumList');
+    list.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Loading...';
+    modal.classList.remove('hidden');
+    fetch('/albums?format=json')
+      .then(function(r) { return r.json(); })
+      .then(function(albums) {
+        if (!albums.length) {
+          list.innerHTML = '<p style="color:var(--clr-text-muted);padding:16px">No albums yet. <a href="/albums">Create one</a></p>';
+          return;
+        }
+        list.innerHTML = '';
+        albums.forEach(function(a) {
+          var btn = document.createElement('button');
+          btn.className = 'btn btn-sm btn-secondary';
+          btn.style.margin = '4px';
+          btn.innerHTML = '<i class="fas fa-book"></i> ' + a.name + ' (' + (a.item_count || 0) + ')';
+          btn.addEventListener('click', function() {
+            fetch('/album/' + a.id + '/add', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({media_id: parseInt(mediaId)}) })
+              .then(function(r) { return r.json(); })
+              .then(function(d) {
+                if (d.success) { showToast('Added to ' + a.name, 'success'); modal.classList.add('hidden'); }
+                else { showToast(d.error || 'Failed', 'error'); }
+              });
+          });
+          list.appendChild(btn);
+        });
+      });
+  });
+  document.getElementById('albumPickerClose')?.addEventListener('click', function() { modal.classList.add('hidden'); });
+}
+
 function initLikeShare() {
   var likeBtn = document.getElementById('likeBtn');
   var shareBtn = document.getElementById('shareBtn');
@@ -256,13 +410,22 @@ function initLikeShare() {
   }
   if (shareBtn) {
     shareBtn.addEventListener('click', function () {
-      fetch('/share/' + shareBtn.getAttribute('data-id'), { method: 'POST' })
+      var ttl = document.getElementById('shareTTL');
+      var expires_in = ttl ? parseInt(ttl.value) : 0;
+      fetch('/share/' + shareBtn.getAttribute('data-id'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ expires_in: expires_in })
+      })
         .then(function (r) { return r.json(); })
         .then(function (d) {
           if (d.url) {
             var full = window.location.origin + d.url;
-            if (navigator.clipboard) { navigator.clipboard.writeText(full).then(function () { showToast('Share link copied!', 'success'); }); }
-            else { prompt('Copy this link:', full); }
+            if (navigator.clipboard) {
+              navigator.clipboard.writeText(full).then(function () {
+                showToast('<i class="fas fa-check-circle"></i> Copied! <code style="font-size:0.8rem;background:rgba(255,255,255,0.15);padding:2px 6px;border-radius:4px">' + full + '</code>', 'success');
+              });
+            } else { prompt('Copy this link:', full); }
           } else { showToast('Failed to create share link', 'error'); }
         });
     });
@@ -408,6 +571,31 @@ function initSlideshow() {
       if (e.key === 'ArrowRight') nextBtn.click();
     });
     document.body.style.overflow = 'hidden';
+  });
+}
+
+function initDropZone() {
+  var zone = document.getElementById('dropZone');
+  var input = document.getElementById('file');
+  if (!zone || !input) return;
+  ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(function(ev) {
+    zone.addEventListener(ev, function(e) { e.preventDefault(); e.stopPropagation(); });
+  });
+  zone.addEventListener('dragenter', function() { zone.classList.add('dragover'); });
+  zone.addEventListener('dragover', function() { zone.classList.add('dragover'); });
+  zone.addEventListener('dragleave', function() { zone.classList.remove('dragover'); });
+  zone.addEventListener('drop', function(e) {
+    zone.classList.remove('dragover');
+    if (e.dataTransfer.files.length) {
+      input.files = e.dataTransfer.files;
+      // Show filename
+      var p = zone.querySelector('p');
+      if (p) p.innerHTML = '<i class="fas fa-check-circle" style="color:var(--clr-success)"></i> ' + e.dataTransfer.files.length + ' file(s) selected';
+    }
+  });
+  input.addEventListener('change', function() {
+    var p = zone.querySelector('p');
+    if (p && input.files.length) p.innerHTML = '<i class="fas fa-check-circle" style="color:var(--clr-success)"></i> ' + input.files.length + ' file(s) selected';
   });
 }
 

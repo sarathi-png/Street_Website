@@ -20,6 +20,11 @@
         <div class="stat-label">Videos</div>
       </div>
       <div class="stat-card">
+        <i class="fas fa-music"></i>
+        <div class="stat-value"><%= stats.audioCount || 0 %></div>
+        <div class="stat-label">Audio</div>
+      </div>
+      <div class="stat-card">
         <i class="fas fa-tags"></i>
         <div class="stat-value"><%= stats.categoryCount %></div>
         <div class="stat-label">Categories</div>
@@ -48,11 +53,66 @@
         <thead><tr><th>Title</th><th>Type</th><th>Category</th><th>Date</th></tr></thead>
         <tbody>
           <% (stats.recentMedia || []).forEach(function(item) { %>
-            <tr><td><strong><%= item.title %></strong></td><td><span class="media-type-badge"><i class="fas fa-<%= item.type === 'video' ? 'video' : 'camera' %>"></i> <%= item.type %></span></td><td><%= item.category_name || '<span class="text-muted">—</span>' %></td><td><%= new Date(item.created_at).toLocaleDateString('en-IN') %></td></tr>
+            <tr><td><strong><%= item.title %></strong></td><td><span class="media-type-badge"><i class="fas fa-<%= item.type === 'video' ? 'video' : (item.type === 'audio' ? 'music' : 'camera') %>"></i> <%= item.type %></span></td><td><%= item.category_name || '<span class="text-muted">—</span>' %></td><td><%= new Date(item.created_at).toLocaleDateString('en-IN') %></td></tr>
           <% }) %>
           <% if (!stats.recentMedia || stats.recentMedia.length === 0) { %><tr><td colspan="4" class="text-center">No media yet — <a href="/admin/media">upload now</a></td></tr><% } %>
         </tbody>
       </table>
     </div>
+
+    <div class="analytics-section" style="margin-top:32px">
+      <h2 class="section-title"><i class="fas fa-chart-bar"></i> Analytics</h2>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:16px">
+        <div class="stat-card" style="padding:20px">
+          <h3 style="font-size:0.9rem;margin-bottom:12px;color:var(--clr-text-muted)">Views per Day (Last 30)</h3>
+          <canvas id="viewsChart" height="200"></canvas>
+        </div>
+        <div class="stat-card" style="padding:20px">
+          <h3 style="font-size:0.9rem;margin-bottom:12px;color:var(--clr-text-muted)">Media by Category</h3>
+          <canvas id="categoryChart" height="200"></canvas>
+        </div>
+      </div>
+      <div class="stat-card" style="padding:20px;margin-top:16px">
+        <h3 style="font-size:0.9rem;margin-bottom:12px;color:var(--clr-text-muted)">Top 5 Most Viewed</h3>
+        <div class="admin-table-wrapper">
+          <table class="admin-table">
+            <thead><tr><th>Title</th><th>Type</th><th>Views</th><th>Likes</th><th>Downloads</th></tr></thead>
+            <tbody>
+              <% (stats.topMedia || []).forEach(function(item) { %>
+                <tr><td><a href="/media/<%= item.id %>"><%= item.title %></a></td><td><span class="media-type-badge"><i class="fas fa-<%= item.type === 'video' ? 'video' : 'camera' %>"></i></span></td><td><%= item.views %></td><td><%= item.likes %></td><td><%= item.downloads %></td></tr>
+              <% }) %>
+              <% if (!stats.topMedia || stats.topMedia.length === 0) { %><tr><td colspan="5" class="text-center">No data yet</td></tr><% } %>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
   </div>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  <script>
+    (function() {
+      // Views per day chart
+      var viewsCtx = document.getElementById('viewsChart');
+      if (viewsCtx) {
+        var days = <%= JSON.stringify((stats.viewsByDay || []).map(function(d) { return d.day; }).reverse()) %>;
+        var views = <%= JSON.stringify((stats.viewsByDay || []).map(function(d) { return d.total_views; }).reverse()) %>;
+        new Chart(viewsCtx, {
+          type: 'bar',
+          data: { labels: days, datasets: [{ label: 'Views', data: views, backgroundColor: 'rgba(184, 58, 44, 0.6)', borderColor: '#b83a2c', borderWidth: 1 }] },
+          options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } } }
+        });
+      }
+      // Category chart
+      var catCtx = document.getElementById('categoryChart');
+      if (catCtx) {
+        var catNames = <%= JSON.stringify((stats.mediaByCategory || []).map(function(c) { return c.name || 'Uncategorized'; })) %>;
+        var catCounts = <%= JSON.stringify((stats.mediaByCategory || []).map(function(c) { return c.count; })) %>;
+        new Chart(catCtx, {
+          type: 'doughnut',
+          data: { labels: catNames, datasets: [{ data: catCounts, backgroundColor: ['#b83a2c','#d4a017','#27ae60','#2980b9','#8e44ad','#e67e22','#1abc9c','#c0392b','#7f8c8d'] }] },
+          options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { font: { size: 11 } } } } }
+        });
+      }
+    })();
+  </script>
 <%- include('../partials/footer') %>

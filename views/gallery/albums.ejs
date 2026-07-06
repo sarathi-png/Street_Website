@@ -1,0 +1,68 @@
+<%- include('../partials/header') %>
+  <div class="gallery-hero">
+    <h1><i class="fas fa-book"></i> Albums</h1>
+    <p>Curate your own collections</p>
+  </div>
+
+  <div class="gallery-controls">
+    <button class="btn btn-primary" id="createAlbumBtn"><i class="fas fa-plus"></i> New Album</button>
+  </div>
+
+  <div id="createAlbumForm" class="hidden" style="margin-bottom:24px;padding:16px;background:var(--clr-surface);border-radius:var(--radius-sm);border:1px solid var(--clr-border)">
+    <form id="albumCreateForm" class="upload-form" style="gap:8px">
+      <div class="form-group"><label>Album name</label><input type="text" id="albumName" required placeholder="My Album"></div>
+      <div class="form-group"><label>Description (optional)</label><input type="text" id="albumDesc" placeholder="A collection of..."></div>
+      <button type="submit" class="btn btn-primary"><i class="fas fa-check"></i> Create</button>
+      <button type="button" class="btn btn-secondary" id="cancelAlbumBtn">Cancel</button>
+    </form>
+  </div>
+
+  <% if ((typeof albums !== 'undefined' ? albums : []).length === 0) { %>
+    <div class="empty-state">
+      <i class="fas fa-book-open"></i>
+      <p>No albums yet — create one to start organizing media</p>
+    </div>
+  <% } else { %>
+    <div class="media-grid">
+      <% albums.forEach(function(album) { %>
+        <a href="/album/<%= album.id %>" class="media-card">
+          <div class="media-card-img">
+            <div class="media-card-placeholder" style="background:var(--clr-primary-light);font-size:2.5rem"><i class="fas fa-book" style="color:var(--clr-primary)"></i></div>
+            <div class="play-badge"><i class="fas fa-layer-group"></i></div>
+          </div>
+          <div class="media-card-info">
+            <h3 class="media-card-title"><%= album.name %></h3>
+            <% if (album.description) { %><p class="media-card-desc"><%= album.description.length > 60 ? album.description.slice(0, 60) + '...' : album.description %></p><% } %>
+            <div class="media-card-meta">
+              <span class="media-type-badge"><i class="fas fa-images"></i> <%= album.item_count || 0 %> items</span>
+              <span class="media-stat"><i class="fas fa-user"></i> <%= album.owner_name %></span>
+            </div>
+          </div>
+        </a>
+      <% }) %>
+    </div>
+  <% } %>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      var btn = document.getElementById('createAlbumBtn');
+      var form = document.getElementById('createAlbumForm');
+      var cancel = document.getElementById('cancelAlbumBtn');
+      if (btn && form) {
+        btn.addEventListener('click', function() { form.classList.toggle('hidden'); });
+        if (cancel) cancel.addEventListener('click', function() { form.classList.add('hidden'); });
+      }
+      document.getElementById('albumCreateForm')?.addEventListener('submit', function(e) {
+        e.preventDefault();
+        var name = document.getElementById('albumName').value;
+        var desc = document.getElementById('albumDesc').value;
+        fetch('/album/create', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name: name, description: desc}) })
+          .then(function(r) { return r.json(); })
+          .then(function(d) {
+            if (d.success) { window.location.href = '/album/' + d.id; }
+            else { showToast(d.error || 'Failed to create album', 'error'); }
+          });
+      });
+    });
+  </script>
+<%- include('../partials/footer') %>

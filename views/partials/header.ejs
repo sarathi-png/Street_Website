@@ -3,12 +3,13 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title><%= typeof title !== 'undefined' ? title + ' — ' : '' %>Street Gallery</title>
+    <title><%= typeof title !== 'undefined' ? title + ' — ' : '' %>Street Gallery</title>
   <link rel="stylesheet" href="/css/style.css">
   <link rel="manifest" href="/manifest.json">
   <meta name="theme-color" content="#b83a2c">
   <link rel="icon" href="/icon-192.svg" sizes="192x192" type="image/svg+xml">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏘️</text></svg>">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css">
 </head>
 <body>
   <nav class="nav">
@@ -16,18 +17,21 @@
       <a href="/" class="nav-brand"><i class="fas fa-home"></i> Street Gallery</a>
       <div class="nav-links">
         <% if (typeof user !== 'undefined' && user) { %>
-          <a href="/" class="nav-link <%= path === '/' || path.startsWith('/media') || path.startsWith('/category') || path.startsWith('/download') ? 'active' : '' %>"><i class="fas fa-images"></i> Gallery</a>
-          <a href="/favorites" class="nav-link <%= path === '/favorites' ? 'active' : '' %>"><i class="fas fa-heart"></i> Favorites</a>
-          <a href="/watch-later" class="nav-link <%= path === '/watch-later' ? 'active' : '' %>"><i class="fas fa-clock"></i> Watch</a>
+          <a href="/" class="nav-link <%= path === '/' || path.startsWith('/media') || path.startsWith('/category') || path.startsWith('/download') ? 'active' : '' %>"><i class="fas fa-images"></i> <span class="nav-label">Gallery</span></a>
+          <a href="/favorites" class="nav-link <%= path === '/favorites' ? 'active' : '' %>"><i class="fas fa-heart"></i> <span class="nav-label">Favorites</span></a>
+          <a href="/albums" class="nav-link <%= path === '/albums' || path.startsWith('/album/') ? 'active' : '' %>"><i class="fas fa-book"></i> <span class="nav-label">Albums</span></a>
+          <a href="/map" class="nav-link <%= path === '/map' ? 'active' : '' %>"><i class="fas fa-map-marked-alt"></i> <span class="nav-label">Map</span></a>
+          <a href="/watch-later" class="nav-link <%= path === '/watch-later' ? 'active' : '' %>"><i class="fas fa-clock"></i> <span class="nav-label">Watch</span></a>
           <% if (user.role === 'admin') { %>
-            <a href="/admin" class="nav-link <%= path.startsWith('/admin') ? 'active' : '' %>"><i class="fas fa-cog"></i> Admin</a>
-            <a href="/admin/media" class="nav-link"><i class="fas fa-upload"></i> Upload</a>
+            <a href="/admin" class="nav-link <%= (path.startsWith('/admin') && path !== '/admin/media') ? 'active' : '' %>"><i class="fas fa-cog"></i> <span class="nav-label">Admin</span></a>
+            <a href="/admin/media" class="nav-link <%= path.startsWith('/admin/media') ? 'active' : '' %>"><i class="fas fa-upload"></i> <span class="nav-label">Upload</span></a>
           <% } %>
-          <span class="nav-user"><i class="fas fa-user-circle"></i> <%= user.display_name %></span>
-          <a href="/logout" class="nav-link nav-logout"><i class="fas fa-sign-out-alt"></i></a>
+          <span class="nav-user"><i class="fas fa-user-circle"></i> <span class="nav-label"><%= user.display_name %></span></span>
+          <a href="/logout" class="nav-link nav-logout" title="Logout"><i class="fas fa-sign-out-alt"></i></a>
+          <button class="nav-toggle" id="navToggle" aria-label="Toggle menu"><i class="fas fa-bars"></i></button>
         <% } %>
       </div>
-      <button class="theme-toggle" id="themeToggle" aria-label="Toggle theme" title="Toggle theme">🌙</button>
+      <button class="theme-toggle" id="themeToggle" aria-label="Toggle theme" title="Toggle theme"><i class="fas fa-moon"></i></button>
     </div>
   </nav>
   <main class="main">

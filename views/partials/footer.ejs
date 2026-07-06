@@ -9,6 +9,31 @@
     <div class="lightbox-counter" id="lightboxCounter"></div>
   </div>
 
+  <div id="shortcutsModal" class="modal hidden">
+    <div class="modal-overlay" id="shortcutsOverlay"></div>
+    <div class="modal-content" style="max-width:380px">
+      <h2><i class="fas fa-keyboard"></i> Keyboard Shortcuts</h2>
+      <div style="display:grid;grid-template-columns:1fr 2fr;gap:8px 16px;font-size:0.9rem">
+        <span class="shortcut-key"><kbd>Escape</kbd></span><span>Close lightbox / modal / slideshow</span>
+        <span class="shortcut-key"><kbd>←</kbd> <kbd>→</kbd></span><span>Navigate previous / next</span>
+        <span class="shortcut-key"><kbd>L</kbd></span><span>Open lightbox on gallery</span>
+        <span class="shortcut-key"><kbd>S</kbd></span><span>Start slideshow</span>
+        <span class="shortcut-key"><kbd>F</kbd></span><span>Toggle fullscreen</span>
+        <span class="shortcut-key"><kbd>?</kbd></span><span>Toggle this help</span>
+      </div>
+      <div class="modal-actions"><button type="button" class="btn btn-secondary" id="shortcutsClose">Got it</button></div>
+    </div>
+  </div>
+  <script>
+    document.getElementById('shortcutsOverlay')?.addEventListener('click', function() { document.getElementById('shortcutsModal').classList.add('hidden'); });
+    document.getElementById('shortcutsClose')?.addEventListener('click', function() { document.getElementById('shortcutsModal').classList.add('hidden'); });
+    document.addEventListener('keydown', function(e) {
+      if (e.key === '?' && !e.target.closest('input,textarea,select')) {
+        document.getElementById('shortcutsModal')?.classList.toggle('hidden');
+      }
+    });
+  </script>
+
   <script src="/js/main.js"></script>
   <script>if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js');</script>
 </body>
