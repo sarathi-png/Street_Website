@@ -620,48 +620,68 @@ async function generateDriveVideoThumbnail(item) {
     return true;
   }
 
-  const tmpPath = path.join(config.THUMBS_DIR, 'tmp_thumb_' + item.id + '.mp4');
   const url = `https://www.googleapis.com/drive/v3/files/${item.drive_file_id}?alt=media&key=${config.GOOGLE_DRIVE_API_KEY}`;
+  const ranges = ['bytes=0-5242880', 'bytes=0-10485760'];
 
-  await new Promise((resolve, reject) => {
-    const file = fs.createWriteStream(tmpPath);
-    let done = false;
-    const cleanup = (err) => {
-      if (done) return;
-      done = true;
-      try { file.close(); } catch (e) {}
-      try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch (e) {}
-      if (err) reject(err); else resolve();
-    };
+  for (const range of ranges) {
+    const tmpPath = path.join(config.THUMBS_DIR, 'tmp_thumb_' + item.id + '_' + range.slice(-2) + '.mp4');
 
-    https.get(url, { headers: { 'User-Agent': 'StreetGallery/1.0', Range: 'bytes=0-2097152' }, timeout: 30000 }, (driveRes) => {
-      if (driveRes.statusCode !== 200 && driveRes.statusCode !== 206) {
-        driveRes.resume();
-        cleanup(new Error('Drive returned ' + driveRes.statusCode));
-        return;
+    try {
+      await new Promise((resolve, reject) => {
+        const file = fs.createWriteStream(tmpPath);
+        let done = false;
+        const cleanup = (err) => {
+          if (done) return;
+          done = true;
+          try { file.close(); } catch (e) {}
+          try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch (e) {}
+          if (err) reject(err); else resolve();
+        };
+
+        https.get(url, { headers: { 'User-Agent': 'StreetGallery/1.0', Range: range }, timeout: 30000 }, (driveRes) => {
+          if (driveRes.statusCode !== 200 && driveRes.statusCode !== 206) {
+            driveRes.resume();
+            cleanup(new Error('Drive returned ' + driveRes.statusCode));
+            return;
+          }
+          driveRes.pipe(file);
+          driveRes.on('error', cleanup);
+          file.on('finish', cleanup);
+          file.on('error', cleanup);
+        }).on('error', cleanup).on('timeout', function() { this.destroy(); cleanup(new Error('Download timed out')); });
+      });
+
+      await new Promise((resolve, reject) => {
+        const proc = spawn(ffmpegPath, ['-ss', '0.01', '-i', tmpPath, '-vframes', '1', '-s', '400x300', '-q:v', '2', '-loglevel', 'error', '-y', thumbPath]);
+        let stderr = '';
+        proc.stderr.on('data', c => stderr += c);
+        let done = false;
+        const cleanup = (err) => {
+          if (done) return;
+          done = true;
+          try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch (e) {}
+          if (err) reject(err); else resolve();
+        };
+        proc.on('close', (code) => {
+          if (code === 0) cleanup();
+          else {
+            console.error('ffmpeg stderr for', item.title + ':', stderr);
+            cleanup(new Error('ffmpeg exited with code ' + code));
+          }
+        });
+        proc.on('error', cleanup);
+      });
+
+      dbRun('UPDATE media SET thumbnail = ? WHERE id = ?', thumbFilename, item.id);
+      return true;
+    } catch (e) {
+      console.error('Thumbnail attempt failed for', item.title + ':', e.message);
+      try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch (e2) {}
+      if (!e.message.includes('254') || range === ranges[ranges.length - 1]) {
+        throw e;
       }
-      driveRes.pipe(file);
-      driveRes.on('error', cleanup);
-      file.on('finish', cleanup);
-      file.on('error', cleanup);
-    }).on('error', cleanup).on('timeout', function() { this.destroy(); cleanup(new Error('Download timed out')); });
-  });
-
-  await new Promise((resolve, reject) => {
-    const proc = spawn(ffmpegPath, ['-ss', '0.01', '-i', tmpPath, '-vframes', '1', '-s', '400x300', '-q:v', '2', '-loglevel', 'error', '-y', thumbPath]);
-    let done = false;
-    const cleanup = (err) => {
-      if (done) return;
-      done = true;
-      try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch (e) {}
-      if (err) reject(err); else resolve();
-    };
-    proc.on('close', (code) => { if (code === 0) cleanup(); else cleanup(new Error('ffmpeg exited with code ' + code)); });
-    proc.on('error', cleanup);
-  });
-
-  dbRun('UPDATE media SET thumbnail = ? WHERE id = ?', thumbFilename, item.id);
-  return true;
+    }
+  }
 }
 
 router.get('/media/missing-thumbnails-count', requireAdmin, (req, res) => {
