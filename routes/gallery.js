@@ -2,21 +2,21 @@ const express = require('express');
 const { dbGet, dbAll, dbRun, rebuildFtsSearch } = require('../db/schema');
 const path = require('path');
 const fs = require('fs');
-const https = require('https');
 const archiver = require('archiver');
 const crypto = require('crypto');
-const { generateVideoThumb, probeVideoCodec } = require('./helpers');
+const config = require('../config');
+const { proxyDriveFile } = require('./driveProxy');
+const https = require('https');
+const { spawn } = require('child_process');
+const ffmpegPath = require('ffmpeg-static');
 
 const router = express.Router();
-const PAGE_SIZE = 24;
+const PAGE_SIZE = config.PAGE_SIZE;
 
 function requireAuth(req, res, next) {
   if (!req.session.user) return res.redirect('/login');
   next();
 }
-
-const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(__dirname, '..', 'uploads');
-const THUMBS_DIR = process.env.THUMBNAILS_DIR || path.join(__dirname, '..', 'thumbnails');
 
 function getMediaTags(mediaId) {
   const tags = dbAll(`SELECT t.name FROM media_tags mt JOIN tags t ON mt.tag_id = t.id WHERE mt.media_id = ?`, mediaId);
@@ -506,192 +506,53 @@ router.get('/download/category/:id', requireAuth, (req, res) => {
   archive.on('error', err => { throw err; });
   archive.pipe(res);
   media.forEach(item => {
-    const fp = path.join(UPLOADS_DIR, item.filename);
+    const fp = path.join(config.UPLOADS_DIR, item.filename);
     if (fs.existsSync(fp)) archive.file(fp, { name: item.title + path.extname(item.filename) });
   });
   archive.finalize();
 });
 
-function serveFromDisk(item, filePath, req, res) {
-  const stat = fs.statSync(filePath);
-  const fileSize = stat.size;
-  const mimeType = item.mime_type || 'application/octet-stream';
 
-  if (fileSize === 0) return res.status(404).render('error', { title: 'Empty', message: 'File is empty' });
 
-  const range = req.headers.range;
-  if (range) {
-    const parts = range.replace(/bytes=/, '').split('-');
-    const start = parseInt(parts[0], 10);
-    const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
-    const chunkSize = end - start + 1;
+function generateDriveVideoThumb(item) {
+  if (!item.drive_file_id || item.thumbnail) return;
+  const thumbFilename = 'thumb_' + item.id + '.jpg';
+  const thumbPath = path.join(config.THUMBS_DIR, thumbFilename);
+  if (fs.existsSync(thumbPath)) { dbRun('UPDATE media SET thumbnail = ? WHERE id = ?', thumbFilename, item.id); return; }
 
-    if (start >= fileSize || end >= fileSize) {
-      res.status(416).set({ 'Content-Range': `bytes */${fileSize}` }).end();
-      return;
-    }
+  const tmpPath = path.join(config.THUMBS_DIR, 'tmp_' + item.id + '.mp4');
+  const file = fs.createWriteStream(tmpPath);
+  let cleaned = false;
+  const clean = () => { if (!cleaned) { cleaned = true; try { file.close(); } catch (e) {} try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch (e) {} } };
 
-    res.writeHead(206, {
-      'Content-Range': `bytes ${start}-${end}/${fileSize}`,
-      'Accept-Ranges': 'bytes',
-      'Content-Length': chunkSize,
-      'Content-Type': mimeType,
-      'Cache-Control': 'public, max-age=86400'
-    });
-    fs.createReadStream(filePath, { start, end }).pipe(res);
-  } else {
-    res.writeHead(200, {
-      'Content-Length': fileSize,
-      'Content-Type': mimeType,
-      'Accept-Ranges': 'bytes',
-      'Cache-Control': 'public, max-age=86400',
-      'Content-Disposition': 'inline'
-    });
-    fs.createReadStream(filePath).pipe(res);
-  }
-}
-
-function fetchDriveFile(fileId, destPath, apiKey, cb) {
-  const url = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&key=${apiKey}`;
-  const file = fs.createWriteStream(destPath);
-  let aborted = false;
-  function done(err) {
-    if (aborted) return;
-    aborted = true;
-    file.close();
-    cb(err);
-  }
-  https.get(url, { headers: { 'User-Agent': 'StreetGallery/1.0' }, timeout: 600000 }, (driveRes) => {
-    if (driveRes.statusCode === 403 || driveRes.statusCode === 429) {
-      driveRes.resume();
-      file.close();
-      try { if (fs.existsSync(destPath)) fs.unlinkSync(destPath); } catch (e) {}
-      fetchDriveFilePublic(fileId, destPath, cb);
-      return;
-    }
-    if (driveRes.statusCode !== 200) {
-      let d = '';
-      driveRes.on('data', c => d += c);
-      driveRes.on('end', () => done(new Error(`Drive API returned ${driveRes.statusCode}`)));
-      return;
-    }
+  const url = `https://www.googleapis.com/drive/v3/files/${item.drive_file_id}?alt=media&key=${config.GOOGLE_DRIVE_API_KEY}`;
+  https.get(url, { headers: { 'User-Agent': 'StreetGallery/1.0', Range: 'bytes=0-2097152' }, timeout: 30000 }, (driveRes) => {
+    if (driveRes.statusCode !== 200 && driveRes.statusCode !== 206) { driveRes.resume(); clean(); return; }
     driveRes.pipe(file);
-    driveRes.on('error', done);
-    file.on('finish', () => done(null));
-    file.on('error', done);
-  }).on('error', done);
-}
-
-function fetchDriveFilePublic(fileId, destPath, cb) {
-  const file = fs.createWriteStream(destPath);
-  let aborted = false;
-  function done(err) {
-    if (aborted) return;
-    aborted = true; try { file.close(); } catch (e) {}
-    if (err) try { if (fs.existsSync(destPath)) fs.unlinkSync(destPath); } catch (e) {}
-    cb(err);
-  }
-
-  function tryDownload(url, redirectsLeft) {
-    https.get(url, { headers: { 'User-Agent': 'StreetGallery/1.0' }, timeout: 600000 }, (resp) => {
-      // Handle redirects
-      if ((resp.statusCode === 301 || resp.statusCode === 302 || resp.statusCode === 303) && redirectsLeft > 0) {
-        const loc = resp.headers.location;
-        if (!loc) { resp.resume(); done(new Error('Redirect with no location')); return; }
-        resp.resume();
-        const cookies = resp.headers['set-cookie'];
-        const opts = { headers: { 'User-Agent': 'StreetGallery/1.0', 'Accept': '*/*' } };
-        if (cookies) opts.headers['Cookie'] = cookies.join('; ');
-        https.get(loc, opts, (r2) => tryDownloadResponse(r2, redirectsLeft - 1)).on('error', done);
-        return;
-      }
-      tryDownloadResponse(resp, redirectsLeft);
-    }).on('error', done);
-  }
-
-  function tryDownloadResponse(resp, redirectsLeft) {
-    if (resp.statusCode !== 200) { resp.resume(); done(new Error('Public URL returned ' + resp.statusCode)); return; }
-
-    const ct = resp.headers['content-type'] || '';
-    // Google Drive returns HTML for virus scan warning — detect and auto-confirm
-    if (ct.includes('text/html')) {
-      let html = '';
-      resp.on('data', c => html += c);
-      resp.on('end', () => {
-        // Try to extract confirm token from the warning form
-        const m = html.match(/action=.*[?&]confirm=([a-zA-Z0-9_-]+)/);
-        const confirmToken = m ? m[1] : 't';
-        const confirmUrl = `https://drive.google.com/uc?export=download&id=${fileId}&confirm=${confirmToken}`;
-        tryDownload(confirmUrl, redirectsLeft);
+    driveRes.on('error', clean);
+    file.on('finish', () => {
+      const proc = spawn(ffmpegPath, ['-ss', '0.01', '-i', tmpPath, '-vframes', '1', '-s', '400x300', '-q:v', '2', '-loglevel', 'error', '-y', thumbPath]);
+      proc.on('close', (code) => {
+        if (code === 0) dbRun('UPDATE media SET thumbnail = ? WHERE id = ?', thumbFilename, item.id);
+        clean();
       });
-      return;
-    }
-
-    resp.pipe(file);
-    resp.on('error', done);
-    file.on('finish', () => done(null));
-    file.on('error', done);
-  }
-
-  const firstUrl = `https://drive.google.com/uc?export=download&id=${fileId}&confirm=t`; // &confirm=t often bypasses the warning
-  tryDownload(firstUrl, 3);
+      proc.on('error', clean);
+    });
+    file.on('error', clean);
+  }).on('error', clean);
 }
 
 router.get('/stream/:id', requireAuth, (req, res) => {
   const item = dbGet('SELECT * FROM media WHERE id = ?', req.params.id);
   if (!item) return res.status(404).render('error', { title: 'Not Found', message: 'Media not found' });
 
-  const filePath = path.join(UPLOADS_DIR, item.filename);
-
-  // Serve from disk if cached and valid
-  if (fs.existsSync(filePath)) {
-    // Detect corrupted cache (Drive HTML warning page saved as binary)
-    const sniff = Buffer.alloc(64);
-    try {
-      const fd = fs.openSync(filePath, 'r');
-      fs.readSync(fd, sniff, 0, 64, 0);
-      fs.closeSync(fd);
-    } catch (e) {}
-    if (sniff.toString('utf8', 0, 5).toLowerCase() === '<html') {
-      fs.unlinkSync(filePath);
-    } else {
-      return serveFromDisk(item, filePath, req, res);
-    }
-  }
-
-  // Not cached and not a Drive file — 404
   if (!item.drive_file_id) return res.status(404).render('error', { title: 'Not Found', message: 'File not found' });
 
-  // Fetch from Drive, cache locally, then serve from disk
-  const tmpPath = filePath + '.downloading';
-  const apiKey = process.env.GOOGLE_DRIVE_API_KEY;
+  dbRun('UPDATE media SET views = views + 1 WHERE id = ?', req.params.id);
 
-  const onFetched = (err) => {
-    if (err) {
-      try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch (e) {}
-      return res.status(502).json({ error: 'Video unavailable', message: 'Could not fetch from Drive. Try again later.' });
-    }
-    try { fs.renameSync(tmpPath, filePath); } catch (e) {
-      try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch (e2) {}
-      return res.status(502).json({ error: 'Video unavailable' });
-    }
-    // Generate thumbnail async after caching (non-blocking)
-    if (!item.thumbnail) {
-      const thumbFilename = 'thumb_' + item.id + '.jpg';
-      generateVideoThumb(filePath, path.join(THUMBS_DIR, thumbFilename)).then(() => {
-        probeVideoCodec(filePath).then((codec) => {
-          dbRun('UPDATE media SET thumbnail = ?, video_codec = ? WHERE id = ?', thumbFilename, codec, item.id);
-        }).catch(() => {});
-      }).catch(() => {});
-    }
-    serveFromDisk(item, filePath, req, res);
-  };
+  if (!item.thumbnail) generateDriveVideoThumb(item);
 
-  if (apiKey) {
-    fetchDriveFile(item.drive_file_id, tmpPath, apiKey, onFetched);
-  } else {
-    fetchDriveFilePublic(item.drive_file_id, tmpPath, onFetched);
-  }
+  proxyDriveFile(item.drive_file_id, config.GOOGLE_DRIVE_API_KEY, req, res);
 });
 
 router.get('/download/:id', requireAuth, (req, res) => {
@@ -699,36 +560,12 @@ router.get('/download/:id', requireAuth, (req, res) => {
   if (!item) return res.status(404).render('error', { title: 'Not Found', message: 'Media not found' });
   dbRun('UPDATE media SET downloads = downloads + 1 WHERE id = ?', req.params.id);
 
-  const filePath = path.join(UPLOADS_DIR, item.filename);
-  const filename = item.title + path.extname(item.filename);
-
-  // Already cached locally
-  if (fs.existsSync(filePath)) return res.download(filePath, filename);
-
-  // Not cached and not a Drive file — 404
   if (!item.drive_file_id) return res.status(404).render('error', { title: 'Not Found', message: 'File not found' });
 
-  // Fetch from Drive, cache, then serve
-  const tmpPath = filePath + '.downloading';
-  const apiKey = process.env.GOOGLE_DRIVE_API_KEY;
+  const filename = item.title + path.extname(item.filename);
+  res.set('Content-Disposition', `attachment; filename="${filename}"`);
 
-  const onFetched = (err) => {
-    if (err) {
-      try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch (e) {}
-      return res.status(502).json({ error: 'Download unavailable', message: 'Could not fetch from Drive. Try again later.' });
-    }
-    try { fs.renameSync(tmpPath, filePath); } catch (e) {
-      try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch (e2) {}
-      return res.status(502).json({ error: 'Download unavailable' });
-    }
-    res.download(filePath, filename);
-  };
-
-  if (apiKey) {
-    fetchDriveFile(item.drive_file_id, tmpPath, apiKey, onFetched);
-  } else {
-    fetchDriveFilePublic(item.drive_file_id, tmpPath, onFetched);
-  }
+  proxyDriveFile(item.drive_file_id, config.GOOGLE_DRIVE_API_KEY, req, res);
 });
 
 module.exports = router;

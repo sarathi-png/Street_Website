@@ -5,40 +5,27 @@ const rateLimit = require('express-rate-limit');
 const path = require('path');
 const fs = require('fs');
 const helmet = require('helmet');
+const config = require('./config');
 const { initDb } = require('./db/schema');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
 
-// For hosting behind Render/Railway proxy
 app.set('trust proxy', 1);
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 
 app.use(helmet({ contentSecurityPolicy: false }));
 
-const UPLOADS_DIR = process.env.UPLOADS_DIR || process.env.RAILWAY_VOLUME_MOUNT_PATH
-  ? path.join(process.env.RAILWAY_VOLUME_MOUNT_PATH || '/data', 'uploads')
-  : path.join(__dirname, 'uploads');
-const THUMBS_DIR = process.env.THUMBNAILS_DIR || process.env.RAILWAY_VOLUME_MOUNT_PATH
-  ? path.join(process.env.RAILWAY_VOLUME_MOUNT_PATH || '/data', 'thumbnails')
-  : path.join(__dirname, 'thumbnails');
-const DATA_FILE = process.env.DATA_FILE || process.env.RAILWAY_VOLUME_MOUNT_PATH
-  ? path.join(process.env.RAILWAY_VOLUME_MOUNT_PATH || '/data', 'data.db')
-  : path.join(__dirname, 'data.db');
-[{ d: UPLOADS_DIR }, { d: THUMBS_DIR }].forEach(({ d }) => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
-process.env.UPLOADS_DIR = UPLOADS_DIR;
-process.env.THUMBNAILS_DIR = THUMBS_DIR;
-process.env.DATA_FILE = DATA_FILE;
+[{ d: config.UPLOADS_DIR }, { d: config.THUMBS_DIR }].forEach(({ d }) => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
 
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
-app.use('/uploads', express.static(UPLOADS_DIR));
-app.use('/thumbnails', express.static(THUMBS_DIR));
+app.use('/uploads', express.static(config.UPLOADS_DIR));
+app.use('/thumbnails', express.static(config.THUMBS_DIR));
 
 app.use(session({
-  secret: process.env.SESSION_SECRET || 'dev-secret',
+  secret: config.SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
   cookie: { maxAge: 7 * 24 * 60 * 60 * 1000 }
@@ -80,8 +67,8 @@ app.use((err, req, res, next) => {
 });
 
 initDb().then(() => {
-  app.listen(PORT, () => {
-    console.log(`Street Media running at http://localhost:${PORT}`);
+  app.listen(config.PORT, () => {
+    console.log(`Street Media running at http://localhost:${config.PORT}`);
   });
 }).catch(err => {
   console.error('Failed to initialize database:', err);

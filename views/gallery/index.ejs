@@ -98,6 +98,8 @@
           <div class="media-card-img">
             <% if (item.thumbnail) { %>
               <img src="/thumbnails/<%= item.thumbnail %>" alt="<%= item.title %>" loading="lazy">
+            <% } else if (item.drive_file_id) { %>
+              <img src="https://drive.google.com/thumbnail?id=<%= item.drive_file_id %>&sz=w400" alt="<%= item.title %>" loading="lazy">
             <% } else if (item.type === 'photo') { %>
               <img src="/uploads/<%= item.filename %>" alt="<%= item.title %>" loading="lazy">
             <% } else if (item.type === 'audio') { %>

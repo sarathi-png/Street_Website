@@ -12,11 +12,12 @@ const { spawn } = require('child_process');
 const ffmpegPath = require('ffmpeg-static');
 const { generateVideoThumb, probeVideoCodec } = require('./helpers');
 
+const config = require('../config');
+
 const router = express.Router();
 
-const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(__dirname, '..', 'uploads');
-const THUMBS_DIR = process.env.THUMBNAILS_DIR || path.join(__dirname, '..', 'thumbnails');
-[{ d: UPLOADS_DIR }, { d: THUMBS_DIR }].forEach(({ d }) => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
+const UPLOADS_DIR = config.UPLOADS_DIR;
+const THUMBS_DIR = config.THUMBS_DIR;
 
 // In-memory import jobs for SSE progress tracking
 const importJobs = {};
@@ -38,8 +39,8 @@ function syncMediaTags(mediaId, tagNames) {
   });
 }
 
-const UPLOAD_MAX_SIZE = (parseInt(process.env.UPLOAD_MAX_SIZE) || 100) * 1024 * 1024;
-const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'video/mp4', 'video/webm', 'video/ogg', 'video/quicktime', 'audio/mpeg', 'audio/mp3', 'audio/flac', 'audio/wav', 'audio/ogg', 'audio/aac', 'audio/wma', 'audio/x-m4a', 'audio/mp4'];
+const UPLOAD_MAX_SIZE = config.UPLOAD_MAX_SIZE;
+const ALLOWED_TYPES = config.ALLOWED_TYPES;
 
 const storage = multer.diskStorage({
   destination: UPLOADS_DIR,
@@ -176,13 +177,11 @@ async function importDriveFile(fileId, title, categoryId, userId, driveFileInfo,
   const isAudio = mimeType.startsWith('audio/');
 
   if (isVideo || isAudio) {
-    // Video/Audio from Drive — store metadata only. Thumbnail generated lazily on first play.
     dbRun(`INSERT INTO media (title, type, filename, thumbnail, file_size, mime_type, drive_file_id, category_id, uploaded_by, video_codec)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       displayTitle, isVideo ? 'video' : 'audio', finalFilename, null, parseInt(driveFileInfo && driveFileInfo.size) || 0,
       mimeType, fileId, categoryId || null, userId, null);
   } else {
-    // Photo from Drive — download + generate thumbnail
     let thumbFilename = null;
     let stat;
     const tempPath = path.join(UPLOADS_DIR, uuidv4());
@@ -209,7 +208,6 @@ async function importDriveFile(fileId, title, categoryId, userId, driveFileInfo,
         VALUES (?, 'photo', ?, ?, ?, ?, ?, ?, ?)`,
         displayTitle, finalFilename, thumbFilename, stat.size, mimeType, fileId, categoryId || null, userId);
     } else {
-      // Still create a record even if download failed so it can be retried
       dbRun(`INSERT INTO media (title, type, filename, thumbnail, file_size, mime_type, drive_file_id, category_id, uploaded_by)
         VALUES (?, 'photo', ?, ?, ?, ?, ?, ?, ?)`,
         displayTitle, finalFilename, null, 0, mimeType, fileId, categoryId || null, userId);
@@ -332,7 +330,7 @@ router.post('/media/import-drive', requireAdmin, async (req, res) => {
     const extracted = extractDriveId(drive_url);
     if (!extracted) return res.status(400).json({ error: 'Could not extract ID from URL' });
 
-    const apiKey = process.env.GOOGLE_DRIVE_API_KEY;
+    const apiKey = config.GOOGLE_DRIVE_API_KEY;
     if (!apiKey && extracted.type === 'folder') return res.status(400).json({ error: 'GOOGLE_DRIVE_API_KEY not set' });
 
     if (extracted.type === 'folder') {
@@ -610,69 +608,123 @@ router.post('/users/reset-password/:id', requireAdmin, (req, res) => {
   res.redirect('/admin/users?msg=Password+reset');
 });
 
-router.post('/media/regenerate-thumbnails', requireAdmin, async (req, res) => {
-  const videos = dbAll("SELECT * FROM media WHERE type = 'video' AND (thumbnail IS NULL OR thumbnail = '')");
-  const localVideos = videos.filter(item => fs.existsSync(path.join(UPLOADS_DIR, item.filename)));
-  const uncachedCount = videos.length - localVideos.length;
+// ===== Thumbnail generation jobs =====
+const thumbJobs = {};
+let thumbJobCounter = 0;
 
-  if (!localVideos.length) {
-    const msg = uncachedCount > 0
-      ? `No locally-cached videos need thumbnails (${uncachedCount} uncached — play them first to cache)`
-      : 'No videos need thumbnails';
-    return res.json({ success: 0, failed: 0, skipped: 0, total: videos.length, message: msg });
+async function generateDriveVideoThumbnail(item) {
+  const thumbFilename = 'thumb_' + item.id + '.jpg';
+  const thumbPath = path.join(config.THUMBS_DIR, thumbFilename);
+  if (fs.existsSync(thumbPath)) {
+    dbRun('UPDATE media SET thumbnail = ? WHERE id = ?', thumbFilename, item.id);
+    return true;
   }
 
-  let success = 0, failed = 0, lastError = '';
-  for (const item of localVideos) {
-    try {
-      const thumbFilename = 'thumb_' + item.id + '.jpg';
-      await generateVideoThumb(path.join(UPLOADS_DIR, item.filename), path.join(THUMBS_DIR, thumbFilename));
-      const codec = await probeVideoCodec(path.join(UPLOADS_DIR, item.filename));
-      dbRun('UPDATE media SET thumbnail = ?, video_codec = ? WHERE id = ?', thumbFilename, codec, item.id);
-      success++;
-    } catch (e) {
-      console.error('Thumbnail regen failed for media ' + item.id + ':', e.message);
-      failed++;
-      lastError = e.message;
-    }
-  }
+  const tmpPath = path.join(config.THUMBS_DIR, 'tmp_thumb_' + item.id + '.mp4');
+  const url = `https://www.googleapis.com/drive/v3/files/${item.drive_file_id}?alt=media&key=${config.GOOGLE_DRIVE_API_KEY}`;
 
-  let msg = 'Generated ' + success + ' thumbnail' + (success !== 1 ? 's' : '');
-  if (failed) msg += ', ' + failed + ' failed';
-  if (uncachedCount) msg += ', ' + uncachedCount + ' skipped (play video first to cache)';
-  res.json({ success, failed, skipped: uncachedCount, total: videos.length, message: msg, lastError });
+  await new Promise((resolve, reject) => {
+    const file = fs.createWriteStream(tmpPath);
+    let done = false;
+    const cleanup = (err) => {
+      if (done) return;
+      done = true;
+      try { file.close(); } catch (e) {}
+      try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch (e) {}
+      if (err) reject(err); else resolve();
+    };
+
+    https.get(url, { headers: { 'User-Agent': 'StreetGallery/1.0', Range: 'bytes=0-2097152' }, timeout: 30000 }, (driveRes) => {
+      if (driveRes.statusCode !== 200 && driveRes.statusCode !== 206) {
+        driveRes.resume();
+        cleanup(new Error('Drive returned ' + driveRes.statusCode));
+        return;
+      }
+      driveRes.pipe(file);
+      driveRes.on('error', cleanup);
+      file.on('finish', cleanup);
+      file.on('error', cleanup);
+    }).on('error', cleanup).on('timeout', function() { this.destroy(); cleanup(new Error('Download timed out')); });
+  });
+
+  await new Promise((resolve, reject) => {
+    const proc = spawn(ffmpegPath, ['-ss', '0.01', '-i', tmpPath, '-vframes', '1', '-s', '400x300', '-q:v', '2', '-loglevel', 'error', '-y', thumbPath]);
+    let done = false;
+    const cleanup = (err) => {
+      if (done) return;
+      done = true;
+      try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch (e) {}
+      if (err) reject(err); else resolve();
+    };
+    proc.on('close', (code) => { if (code === 0) cleanup(); else cleanup(new Error('ffmpeg exited with code ' + code)); });
+    proc.on('error', cleanup);
+  });
+
+  dbRun('UPDATE media SET thumbnail = ? WHERE id = ?', thumbFilename, item.id);
+  return true;
+}
+
+router.get('/media/missing-thumbnails-count', requireAdmin, (req, res) => {
+  const count = dbGet("SELECT COUNT(*) as c FROM media WHERE type = 'video' AND thumbnail IS NULL AND drive_file_id IS NOT NULL").c;
+  res.json({ count });
 });
 
-router.post('/media/fix-drive-thumbnails', requireAdmin, async (req, res) => {
-  const videos = dbAll("SELECT * FROM media WHERE type = 'video' AND (thumbnail IS NULL OR thumbnail = '')");
-  if (!videos.length) return res.json({ success: 0, failed: 0, message: 'No Drive-imported videos need thumbnails' });
+router.post('/media/generate-drive-thumbnails', requireAdmin, async (req, res) => {
+  const videos = dbAll("SELECT * FROM media WHERE type = 'video' AND thumbnail IS NULL AND drive_file_id IS NOT NULL");
+  if (!videos.length) return res.json({ jobId: null, message: 'No videos need thumbnails' });
 
-  let success = 0, failed = 0, skipped = 0, lastError = '';
-  for (const item of videos) {
-    const localPath = path.join(UPLOADS_DIR, item.filename);
-    if (!fs.existsSync(localPath)) { skipped++; continue; }
-    try {
-      const thumbFilename = 'thumb_' + item.id + '.jpg';
-      await generateVideoThumb(localPath, path.join(THUMBS_DIR, thumbFilename));
-      const codec = await probeVideoCodec(localPath);
-      dbRun('UPDATE media SET thumbnail = ?, video_codec = ? WHERE id = ?', thumbFilename, codec, item.id);
-      success++;
-    } catch (e) {
-      console.error('Drive thumbnail fix failed for media ' + item.id + ':', e.message);
-      failed++;
-      lastError = e.message;
+  const jobId = ++thumbJobCounter;
+  thumbJobs[jobId] = { total: videos.length, current: 0, errors: 0, lastError: '', done: false, message: '' };
+
+  setImmediate(async () => {
+    for (const item of videos) {
+      try {
+        await generateDriveVideoThumbnail(item);
+        thumbJobs[jobId].current++;
+      } catch (e) {
+        console.error('Thumbnail failed for media ' + item.id + ':', e.message);
+        thumbJobs[jobId].errors++;
+        thumbJobs[jobId].lastError = item.title + ': ' + e.message;
+        thumbJobs[jobId].current++;
+      }
     }
-  }
+    const ok = thumbJobs[jobId].current - thumbJobs[jobId].errors;
+    thumbJobs[jobId].done = true;
+    thumbJobs[jobId].message = `Generated ${ok} of ${thumbJobs[jobId].total} thumbnails`;
+    setTimeout(() => { delete thumbJobs[jobId]; }, 120000);
+  });
 
-  let msg = 'Fixed ' + success + ' Drive thumbnail' + (success !== 1 ? 's' : '');
-  if (failed) msg += ', ' + failed + ' failed';
-  if (skipped) msg += ', ' + skipped + ' not cached from Drive yet (play video first)';
-  res.json({ success, failed, skipped, total: videos.length, message: msg, lastError });
+  res.json({ jobId });
+});
+
+router.get('/media/thumbnail-progress/:jobId', requireAdmin, (req, res) => {
+  const jobId = parseInt(req.params.jobId);
+  const job = thumbJobs[jobId];
+  if (!job) return res.status(404).json({ error: 'Job not found' });
+
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no'
+  });
+
+  let timer;
+  function send() {
+    if (!thumbJobs[jobId]) { res.write('event: error\ndata: {}\n\n'); res.end(); return; }
+    const j = thumbJobs[jobId];
+    res.write(`data: ${JSON.stringify({ current: j.current, total: j.total, errors: j.errors, lastError: j.lastError })}\n\n`);
+    j.lastError = '';
+    if (j.done) { res.write(`event: done\ndata: ${JSON.stringify({ message: j.message })}\n\n`); res.end(); }
+    else { timer = setTimeout(send, 600); }
+  }
+  req.on('close', () => { clearTimeout(timer); });
+  timer = setTimeout(send, 300);
 });
 
 router.use((err, req, res, next) => {
   if (err instanceof multer.MulterError) {
-    if (err.code === 'LIMIT_FILE_SIZE') return res.status(400).json({ error: `File too large. Max ${process.env.UPLOAD_MAX_SIZE || 100}MB` });
+    if (err.code === 'LIMIT_FILE_SIZE') return res.status(400).json({ error: `File too large. Max ${config.UPLOAD_MAX_SIZE / (1024 * 1024)}MB` });
     return res.status(400).json({ error: err.message });
   }
   next(err);

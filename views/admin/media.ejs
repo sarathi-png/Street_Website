@@ -81,8 +81,7 @@
     <div class="admin-header" style="margin-top:8px">
       <h2 class="section-title" style="margin:0"><i class="fas fa-list"></i> All Media</h2>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        <button type="button" class="btn btn-sm btn-secondary" id="regenThumbBtn" onclick="regenThumbnails()"><i class="fas fa-sync-alt"></i> Regenerate Thumbnails</button>
-        <button type="button" class="btn btn-sm btn-warning" id="regenFailedBtn" onclick="regenFailedThumbnails()"><i class="fas fa-exclamation-triangle"></i> Fix Drive Thumbnails</button>
+        <button type="button" class="btn btn-sm btn-primary" id="genDriveThumbBtn" onclick="generateDriveThumbnails()" disabled><i class="fas fa-video"></i> <span id="genThumbBtnText">Checking...</span></button>
         <form method="POST" action="/admin/media/bulk-move" id="bulkForm" style="display:none;align-items:center;gap:8px">
           <span id="bulkCount">0 selected</span>
           <select name="category_id" id="bulkCategorySelect"><option value="">Move to category...</option>
@@ -93,6 +92,14 @@
           <button type="button" class="btn btn-sm btn-secondary" id="bulkClearBtn">Clear</button>
         </form>
       </div>
+    </div>
+    <div id="thumbProgress" class="hidden" style="margin-top:12px;margin-bottom:12px;padding:12px;background:var(--clr-surface);border-radius:8px;border:1px solid var(--clr-border)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <span id="thumbProgressLabel" style="font-size:0.9rem;font-weight:600"><i class="fas fa-sync-alt fa-spin"></i> Generating thumbnails...</span>
+        <span id="thumbProgressCount" style="font-size:0.8rem;color:var(--clr-text-muted)">0 / 0</span>
+      </div>
+      <div class="progress-bar-upload"><div class="progress-fill-upload" id="thumbProgressBar"></div></div>
+      <div id="thumbProgressError" style="font-size:0.8rem;color:var(--clr-text-muted);margin-top:6px"></div>
     </div>
     <div class="admin-table-wrapper">
       <table class="admin-table">
@@ -153,40 +160,73 @@
     </div>
   </div>
   <script>
-    function regenThumbnails() {
-      var btn = document.getElementById('regenThumbBtn');
-      btn.disabled = true;
-      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Regenerating...';
-      fetch('/admin/media/regenerate-thumbnails', { method: 'POST' })
+    (function() {
+      fetch('/admin/media/missing-thumbnails-count')
         .then(function(r) { return r.json(); })
         .then(function(d) {
-          btn.disabled = false;
-          btn.innerHTML = '<i class="fas fa-sync-alt"></i> Regenerate Thumbnails';
-          showToast(d.message, d.failed ? 'error' : 'success');
-          if (d.success > 0) setTimeout(function() { location.reload(); }, 1000);
+          var btn = document.getElementById('genDriveThumbBtn');
+          var text = document.getElementById('genThumbBtnText');
+          if (d.count > 0) {
+            btn.disabled = false;
+            text.textContent = 'Generate ' + d.count + ' video thumbnail' + (d.count !== 1 ? 's' : '') + ' (from Drive)';
+          } else {
+            text.textContent = 'No missing thumbnails';
+          }
         })
-        .catch(function(e) {
-          btn.disabled = false;
-          btn.innerHTML = '<i class="fas fa-sync-alt"></i> Regenerate Thumbnails';
-          showToast('Regeneration failed: ' + e.message, 'error');
+        .catch(function() {
+          document.getElementById('genThumbBtnText').textContent = 'Check failed';
         });
-    }
-    function regenFailedThumbnails() {
-      var btn = document.getElementById('regenFailedBtn');
+    })();
+
+    function generateDriveThumbnails() {
+      var btn = document.getElementById('genDriveThumbBtn');
       btn.disabled = true;
-      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Fixing...';
-      fetch('/admin/media/fix-drive-thumbnails', { method: 'POST' })
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Starting...';
+
+      var progress = document.getElementById('thumbProgress');
+      var label = document.getElementById('thumbProgressLabel');
+      var count = document.getElementById('thumbProgressCount');
+      var bar = document.getElementById('thumbProgressBar');
+      var errDiv = document.getElementById('thumbProgressError');
+
+      fetch('/admin/media/generate-drive-thumbnails', { method: 'POST' })
         .then(function(r) { return r.json(); })
         .then(function(d) {
-          btn.disabled = false;
-          btn.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Fix Drive Thumbnails';
-          showToast(d.message, d.failed ? 'error' : 'success');
-          if (d.success > 0) setTimeout(function() { location.reload(); }, 1000);
+          if (!d.jobId) {
+            btn.innerHTML = '<i class="fas fa-video"></i> <span id="genThumbBtnText">' + d.message + '</span>';
+            showToast(d.message, 'info');
+            return;
+          }
+          btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generating...';
+          progress.classList.remove('hidden');
+          var evtSource = new EventSource('/admin/media/thumbnail-progress/' + d.jobId);
+          evtSource.onmessage = function(e) {
+            var data = JSON.parse(e.data);
+            var pct = data.total > 0 ? Math.round(data.current / data.total * 100) : 0;
+            count.textContent = data.current + ' / ' + data.total;
+            bar.style.width = pct + '%';
+            if (data.errors > 0) label.innerHTML = '<i class="fas fa-sync-alt fa-spin"></i> Generating (' + data.errors + ' errors)';
+            if (data.lastError) errDiv.textContent = data.lastError;
+          };
+          evtSource.addEventListener('done', function(e) {
+            evtSource.close();
+            var data = JSON.parse(e.data);
+            progress.classList.add('hidden');
+            btn.innerHTML = '<i class="fas fa-video"></i> <span id="genThumbBtnText">Done</span>';
+            showToast(data.message, data.message.indexOf('errors') > -1 ? 'error' : 'success');
+            setTimeout(function() { location.reload(); }, 1500);
+          });
+          evtSource.addEventListener('error', function() {
+            evtSource.close();
+            progress.classList.add('hidden');
+            btn.innerHTML = '<i class="fas fa-video"></i> <span id="genThumbBtnText">Failed</span>';
+            showToast('Thumbnail generation connection lost', 'error');
+          });
         })
         .catch(function(e) {
-          btn.disabled = false;
-          btn.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Fix Drive Thumbnails';
-          showToast('Regeneration failed: ' + e.message, 'error');
+          progress.classList.add('hidden');
+          btn.innerHTML = '<i class="fas fa-video"></i> <span id="genThumbBtnText">Error</span>';
+          showToast('Failed to start: ' + e.message, 'error');
         });
     }
   </script>

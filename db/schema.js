@@ -2,8 +2,9 @@ const initSqlJs = require('sql.js');
 const path = require('path');
 const fs = require('fs');
 const bcrypt = require('bcryptjs');
+const config = require('../config');
 
-const DB_PATH = process.env.DATA_FILE || path.join(__dirname, '..', 'data.db');
+const DB_PATH = config.DATA_FILE;
 let db = null;
 let SQL = null;
 
