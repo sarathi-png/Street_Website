@@ -1,0 +1,1002 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Family Video Gallery - Our Moments</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Inter:wght@300;400;500;600&family=Source+Sans+Pro:wght@400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css">
+    <style>
+        :root {
+            --primary: #8b5cf6;
+            --primary-dark: #7c3aed;
+            --primary-light: #a78bfa;
+            --secondary: #ec4899;
+            --secondary-dark: #db2777;
+            --accent: #10b981;
+            --background: #fefefe;
+            --surface: #ffffff;
+            --text-primary: #1f2937;
+            --text-secondary: #6b7280;
+            --text-muted: #9ca3af;
+            --border: #e5e7eb;
+            --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+            --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.07);
+            --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.1);
+            --shadow-xl: 0 20px 25px rgba(0, 0, 0, 0.15);
+            --gradient-primary: linear-gradient(135deg, #8b5cf6 0%, #ec4899 100%);
+            --gradient-subtle: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+            --video-aspect: 16 / 9;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: var(--background);
+            color: var(--text-primary);
+            line-height: 1.6;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+
+        /* Navigation */
+        nav {
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
+            box-shadow: var(--shadow-sm);
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+            backdrop-filter: blur(10px);
+            background: rgba(255, 255, 255, 0.95);
+        }
+
+        .nav-inner {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 0 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            height: 70px;
+        }
+
+        .nav-brand {
+            font-family: 'Playfair Display', serif;
+            font-weight: 700;
+            font-size: 24px;
+            color: var(--primary);
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.3s ease;
+        }
+
+        .nav-brand:hover {
+            color: var(--primary-dark);
+            transform: translateY(-1px);
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 32px;
+            align-items: center;
+        }
+
+        .nav-link {
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-weight: 500;
+            font-size: 15px;
+            padding: 8px 16px;
+            border-radius: 8px;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            position: relative;
+        }
+
+        .nav-link:hover {
+            color: var(--primary);
+            background: var(--gradient-subtle);
+        }
+
+        .nav-link.active {
+            color: var(--primary-dark);
+            font-weight: 600;
+        }
+
+        .nav-link.active::after {
+            content: '';
+            position: absolute;
+            bottom: -1px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 20px;
+            height: 2px;
+            background: var(--gradient-primary);
+            border-radius: 1px;
+        }
+
+        .nav-user {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 8px 16px;
+            background: var(--gradient-subtle);
+            border-radius: 24px;
+            margin-left: auto;
+        }
+
+        .nav-user i {
+            color: var(--primary);
+            font-size: 20px;
+        }
+
+        .nav-user span {
+            font-weight: 500;
+            color: var(--text-primary);
+            font-size: 14px;
+        }
+
+        .nav-toggle {
+            display: none;
+            background: none;
+            border: none;
+            font-size: 20px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            padding: 8px;
+            border-radius: 6px;
+            transition: all 0.3s ease;
+        }
+
+        .nav-toggle:hover {
+            background: var(--border);
+            color: var(--primary);
+        }
+
+        .theme-toggle {
+            background: none;
+            border: 1px solid var(--border);
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .theme-toggle:hover {
+            background: var(--gradient-subtle);
+            border-color: var(--primary-light);
+        }
+
+        main {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 40px 24px;
+        }
+
+        /* Hero Section */
+        .hero {
+            text-align: center;
+            padding: 80px 0;
+            background: linear-gradient(135deg, rgba(139, 92, 246, 0.03) 0%, rgba(236, 72, 153, 0.03) 100%);
+            border-radius: 24px;
+            margin-bottom: 60px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .hero::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            right: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle, rgba(139, 92, 246, 0.1) 0%, transparent 70%);
+            animation: float 20s ease-in-out infinite;
+        }
+
+        @keyframes float {
+            0%, 100% { transform: translateY(0px) rotate(0deg); }
+            50% { transform: translateY(-20px) rotate(180deg); }
+        }
+
+        .hero-content {
+            position: relative;
+            z-index: 1;
+        }
+
+        .hero-title {
+            font-family: 'Playfair Display', serif;
+            font-size: 56px;
+            font-weight: 700;
+            background: var(--gradient-primary);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 16px;
+            letter-spacing: -1px;
+        }
+
+        .hero-subtitle {
+            font-size: 20px;
+            color: var(--text-secondary);
+            max-width: 600px;
+            margin: 0 auto;
+            line-height: 1.6;
+        }
+
+        /* Gallery Grid */
+        .gallery {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+            gap: 32px;
+            margin-bottom: 60px;
+        }
+
+        .gallery-item {
+            background: var(--surface);
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: var(--shadow-md);
+            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+        }
+
+        .gallery-item:hover {
+            transform: translateY(-8px);
+            box-shadow: var(--shadow-xl);
+        }
+
+        .gallery-item.featured {
+            grid-column: span 2;
+        }
+
+        .gallery-thumbnail {
+            position: relative;
+            height: 0;
+            padding-bottom: calc(9 / 16 * 100%);
+            overflow: hidden;
+            background: var(--gradient-subtle);
+        }
+
+        .gallery-thumbnail img,
+        .gallery-thumbnail iframe {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transition: transform 0.6s ease;
+        }
+
+        .gallery-item:hover .gallery-thumbnail img,
+        .gallery-item:hover .gallery-thumbnail iframe {
+            transform: scale(1.05);
+        }
+
+        .gallery-thumbnail-placeholder {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: var(--gradient-primary);
+            color: white;
+            font-size: 48px;
+            gap: 12px;
+        }
+
+        .placeholder-icon {
+            width: 80px;
+            height: 80px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 36px;
+        }
+
+        .placeholder-text {
+            font-size: 18px;
+            font-weight: 500;
+            padding: 0 20px;
+            text-align: center;
+        }
+
+        .play-overlay {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 50%;
+            width: 80px;
+            height: 80px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 32px;
+            color: var(--primary);
+            box-shadow: var(--shadow-lg);
+            opacity: 0;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+
+        .gallery-item:hover .play-overlay {
+            opacity: 1;
+            transform: translate(-50%, -50%) scale(1.1);
+        }
+
+        .play-overlay:hover {
+            background: var(--primary);
+            color: white;
+        }
+
+        .gallery-content {
+            padding: 24px;
+        }
+
+        .gallery-meta {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 12px;
+        }
+
+        .gallery-category {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--primary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .gallery-date {
+            font-size: 13px;
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .gallery-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 8px;
+            line-height: 1.4;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        .gallery-stats {
+            display: flex;
+            gap: 16px;
+            font-size: 13px;
+            color: var(--text-muted);
+        }
+
+        .stat {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        /* Forms */
+        .auth-page {
+            max-width: 480px;
+            margin: 80px auto;
+            background: var(--surface);
+            border-radius: 24px;
+            padding: 48px;
+            box-shadow: var(--shadow-xl);
+        }
+
+        .auth-card {
+            text-align: center;
+        }
+
+        .auth-icon {
+            width: 80px;
+            height: 80px;
+            background: var(--gradient-primary);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 36px;
+            color: white;
+            margin: 0 auto 24px;
+            box-shadow: var(--shadow-lg);
+        }
+
+        .auth-title {
+            font-family: 'Playfair Display', serif;
+            font-size: 32px;
+            font-weight: 700;
+            margin-bottom: 8px;
+            background: var(--gradient-primary);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .auth-subtitle {
+            color: var(--text-secondary);
+            margin-bottom: 32px;
+            font-size: 16px;
+        }
+
+        .form-group {
+            margin-bottom: 24px;
+            text-align: left;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+            color: var(--text-primary);
+            font-size: 14px;
+        }
+
+        .form-control {
+            width: 100%;
+            padding: 12px 16px;
+            border: 2px solid var(--border);
+            border-radius: 8px;
+            font-size: 16px;
+            transition: all 0.3s ease;
+            background: var(--surface);
+        }
+
+        .form-control:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.1);
+        }
+
+        .btn {
+            padding: 12px 32px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            text-decoration: none;
+            justify-content: center;
+        }
+
+        .btn-primary {
+            background: var(--gradient-primary);
+            color: white;
+            box-shadow: var(--shadow-md);
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-lg);
+        }
+
+        .btn-primary:active {
+            transform: translateY(0);
+        }
+
+        .btn-block {
+            width: 100%;
+        }
+
+        .alert {
+            padding: 12px 16px;
+            border-radius: 8px;
+            margin-bottom: 24px;
+            font-size: 14px;
+        }
+
+        .alert-error {
+            background: #fef2f2;
+            border: 1px solid #fee2e2;
+            color: #dc2626;
+        }
+
+        /* Video Embed */
+        .video-embed-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: var(--surface);
+            border-radius: 24px;
+            overflow: hidden;
+            box-shadow: var(--shadow-xl);
+        }
+
+        .video-embed-header {
+            padding: 32px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .video-embed-title {
+            font-family: 'Playfair Display', serif;
+            font-size: 28px;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+
+        .video-embed-content {
+            position: relative;
+            height: 0;
+            padding-bottom: calc(9 / 16 * 100%);
+            background: #000;
+        }
+
+        .video-embed-iframe {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            border: none;
+        }
+
+        /* Footer */
+        footer {
+            background: var(--surface);
+            border-top: 1px solid var(--border);
+            padding: 60px 0 30px;
+            margin-top: 80px;
+        }
+
+        .footer-content {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 0 24px;
+            display: grid;
+            grid-template-columns: 2fr 1fr 1fr 1fr;
+            gap: 40px;
+        }
+
+        .footer-brand {
+            font-family: 'Playfair Display', serif;
+            font-size: 24px;
+            font-weight: 700;
+            color: var(--primary);
+            margin-bottom: 16px;
+            display: block;
+        }
+
+        .footer-description {
+            color: var(--text-secondary);
+            line-height: 1.6;
+            margin-bottom: 24px;
+            max-width: 300px;
+        }
+
+        .footer-heading {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 16px;
+        }
+
+        .footer-links {
+            list-style: none;
+        }
+
+        .footer-links li {
+            margin-bottom: 12px;
+        }
+
+        .footer-links a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            transition: color 0.3s ease;
+        }
+
+        .footer-links a:hover {
+            color: var(--primary);
+        }
+
+        /* Responsive */
+        @media (max-width: 1024px) {
+            .gallery {
+                grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            }
+
+            .footer-content {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+
+        @media (max-width: 768px) {
+            .nav-links {
+                display: none;
+            }
+
+            .nav-toggle {
+                display: block;
+            }
+
+            .hero-title {
+                font-size: 42px;
+            }
+
+            .hero-subtitle {
+                font-size: 18px;
+            }
+
+            .gallery {
+                grid-template-columns: 1fr;
+            }
+
+            .gallery-item.featured {
+                grid-column: span 1;
+            }
+
+            .auth-page {
+                margin: 40px 20px;
+                padding: 32px;
+            }
+
+            .footer-content {
+                grid-template-columns: 1fr;
+                text-align: center;
+            }
+
+            .video-embed-header {
+                flex-direction: column;
+                gap: 20px;
+                text-align: center;
+            }
+        }
+
+        /* Animations */
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .gallery-item {
+            animation: fadeInUp 0.6s ease-out;
+        }
+
+        .gallery-item:nth-child(2) { animation-delay: 0.1s; }
+        .gallery-item:nth-child(3) { animation-delay: 0.2s; }
+        .gallery-item:nth-child(4) { animation-delay: 0.3s; }
+        .gallery-item:nth-child(5) { animation-delay: 0.4s; }
+        .gallery-item:nth-child(6) { animation-delay: 0.5s; }
+
+        /* Dark mode support */
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --background: #0f172a;
+                --surface: #1e293b;
+                --text-primary: #f8fafc;
+                --text-secondary: #cbd5e1;
+                --text-muted: #94a3b8;
+                --border: #334155;
+            }
+
+            .nav {
+                background: rgba(15, 23, 42, 0.95);
+                border-bottom-color: var(--border);
+            }
+
+            .gallery-item {
+                background: var(--surface);
+            }
+        }
+    </style>
+</head>
+<body>
+    <nav class="nav">
+        <div class="nav-inner">
+            <a href="/" class="nav-brand">
+                <i class="fas fa-images"></i>
+                Family Gallery
+            </a>
+            <div class="nav-links">
+                <% if (typeof user !== 'undefined' && user) { %>
+                    <a href="/" class="nav-link <%= path === '/' || path.startsWith('/media') || path.startsWith('/category') || path.startsWith('/download') ? 'active' : '' %>">
+                        <i class="fas fa-images"></i>
+                        <span class="nav-label">Gallery</span>
+                    </a>
+                    <a href="/favorites" class="nav-link <%= path === '/favorites' ? 'active' : '' %>">
+                        <i class="fas fa-heart"></i>
+                        <span class="nav-label">Favorites</span>
+                    </a>
+                    <a href="/albums" class="nav-link <%= path === '/albums' || path.startsWith('/album/') ? 'active' : '' %>">
+                        <i class="fas fa-book"></i>
+                        <span class="nav-label">Albums</span>
+                    </a>
+                    <a href="/map" class="nav-link <%= path === '/map' ? 'active' : '' %>">
+                        <i class="fas fa-map-marked-alt"></i>
+                        <span class="nav-label">Map</span>
+                    </a>
+                    <a href="/watch-later" class="nav-link <%= path === '/watch-later' ? 'active' : '' %>">
+                        <i class="fas fa-clock"></i>
+                        <span class="nav-label">Watch Later</span>
+                    </a>
+                    <% if (user.role === 'admin') { %>
+                        <a href="/admin" class="nav-link <%= (path.startsWith('/admin') && path !== '/admin/media') ? 'active' : '' %>">
+                            <i class="fas fa-cog"></i>
+                            <span class="nav-label">Admin</span>
+                        </a>
+                        <a href="/admin/media" class="nav-link <%= path.startsWith('/admin/media') ? 'active' : '' %>">
+                            <i class="fas fa-upload"></i>
+                            <span class="nav-label">Upload</span>
+                        </a>
+                    <% } %>
+                    <div class="nav-user">
+                        <i class="fas fa-user-circle"></i>
+                        <span><%= user.display_name %></span>
+                    </div>
+                    <a href="/logout" class="nav-link nav-logout" title="Logout">
+                        <i class="fas fa-sign-out-alt"></i>
+                    </a>
+                <% } %>
+                <button class="nav-toggle" id="navToggle" aria-label="Toggle menu">
+                    <i class="fas fa-bars"></i>
+                </button>
+            </div>
+            <button class="theme-toggle" id="themeToggle" aria-label="Toggle theme" title="Toggle theme">
+                <i class="fas fa-moon"></i>
+            </button>
+        </div>
+    </nav>
+
+    <main class="main">
+        <% if (typeof title === 'undefined' && !title) { %>
+            <!-- Hero Section for Homepage -->
+            <section class="hero">
+                <div class="hero-content">
+                    <h1 class="hero-title">Our Family Moments</h1>
+                    <p class="hero-subtitle">A beautiful collection of family videos, photos, and memories shared across generations. Relive the special moments that make our family unique.</p>
+                </div>
+            </section>
+
+            <!-- Gallery Section -->
+            <section class="gallery">
+                <% if (typeof media !== 'undefined' && media && media.length > 0) { %>
+                    <% media.forEach(function(item) { %>
+                        <div class="gallery-item <%= item.type === 'video' ? 'featured' : '' %>" data-category="<%= item.category_name || 'uncategorized' %>" data-type="<%= item.type || 'photo' %>">
+                            <div class="gallery-thumbnail">
+                                <% if (item.thumbnail && item.thumbnail.startsWith('http')) { %>
+                                    <img src="<%= item.thumbnail %>" alt="<%= item.title %>" loading="lazy">
+                                <% } else if (item.thumbnail && item.thumbnail.endsWith('.html')) { %>
+                                    <%= item.thumbnail %>
+                                <% } else if (item.thumbnail) { %>
+                                    <img src="/thumbnails/<%= item.thumbnail %>" alt="<%= item.title %>" loading="lazy">
+                                <% } else { %>
+                                    <div class="gallery-thumbnail-placeholder">
+                                        <div class="placeholder-icon">
+                                            <% if (item.type === 'video') { %>
+                                                <i class="fas fa-play"></i>
+                                            <% } else if (item.type === 'audio') { %>
+                                                <i class="fas fa-music"></i>
+                                            <% } else { %>
+                                                <i class="fas fa-image"></i>
+                                            <% } %>
+                                        </div>
+                                        <div class="placeholder-text">
+                                            <% if (item.type === 'video') { %>
+                                                Video File
+                                            <% } else if (item.type === 'audio') { %>
+                                                Audio File
+                                            <% } else { %>
+                                                Photo File
+                                            <% } %>
+                                        </div>
+                                    </div>
+                                <% } %>
+                                
+                                <% if (item.drive_file_id) { %>
+                                    <div class="play-overlay" onclick="window.location.href='/stream/<%= item.id %>'">
+                                        <i class="fas fa-play"></i>
+                                    </div>
+                                <% } %>
+                            </div>
+                            <div class="gallery-content">
+                                <div class="gallery-meta">
+                                    <div class="gallery-category">
+                                        <%= item.category_name || 'General' %>
+                                    </div>
+                                    <div class="gallery-date">
+                                        <i class="fas fa-calendar-alt"></i>
+                                        <%= item.created_at ? new Date(item.created_at).toLocaleDateString() : 'Unknown date' %>
+                                    </div>
+                                </div>
+                                <h3 class="gallery-title"><%= item.title %></h3>
+                                <div class="gallery-stats">
+                                    <div class="stat">
+                                        <i class="fas fa-eye"></i>
+                                        <span><%= item.views || 0 %></span>
+                                    </div>
+                                    <div class="stat">
+                                        <i class="fas fa-heart"></i>
+                                        <span><%= item.likes || 0 %></span>
+                                    </div>
+                                    <div class="stat">
+                                        <i class="fas fa-download"></i>
+                                        <span><%= item.downloads || 0 %></span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    <% }); %>
+                <% } else { %>
+                    <div style="text-align: center; padding: 60px; color: var(--text-secondary);">
+                        <i class="fas fa-folder-open" style="font-size: 48px; margin-bottom: 20px; opacity: 0.5;"></i>
+                        <h3 style="font-size: 24px; margin-bottom: 10px;">No Media Found</h3>
+                        <p style="font-size: 16px;">There are no videos or photos in this gallery yet.</p>
+                        <% if (user && user.role === 'admin') { %>
+                            <a href="/admin/media" class="btn btn-primary" style="margin-top: 20px;">Upload Your First Video</a>
+                        <% } %>
+                    </div>
+                <% } %>
+            </section>
+        <% } %>
+        
+        <!-- Video Embed Page -->
+        <% if (typeof embedUrl !== 'undefined' && embedUrl) { %>
+            <section class="video-embed-container">
+                <div class="video-embed-header">
+                    <h1 class="video-embed-title"><%= title %></h1>
+                    <a href="/" class="btn btn-secondary">
+                        <i class="fas fa-arrow-left"></i>
+                        Back to Gallery
+                    </a>
+                </div>
+                <div class="video-embed-content">
+                    <iframe 
+                        src="<%= embedUrl ?>?autoplay=1&embedded=true" 
+                        frameborder="0" 
+                        allowfullscreen
+                        class="video-embed-iframe"
+                    ></iframe>
+                </div>
+            </section>
+        <% } %>
+    </main>
+
+    <footer>
+        <div class="footer-content">
+            <div>
+                <a href="/" class="footer-brand">
+                    <i class="fas fa-images"></i>
+                    Family Gallery
+                </a>
+                <p class="footer-description">
+                    A beautiful collection of family videos and memories shared across generations. 
+                    Preserving our special moments for years to come.
+                </p>
+            </div>
+            
+            <div>
+                <h4 class="footer-heading">Quick Links</h4>
+                <ul class="footer-links">
+                    <li><a href="/">Home</a></li>
+                    <li><a href="/favorites">Favorites</a></li>
+                    <li><a href="/albums">Albums</a></li>
+                    <li><a href="/map">Map View</a></li>
+                </ul>
+            </div>
+            
+            <div>
+                <h4 class="footer-heading">Features</h4>
+                <ul class="footer-links">
+                    <li><a href="/watch-later">Continue Watching</a></li>
+                    <li><a href="#">Shared Links</a></li>
+                    <li><a href="#">Privacy Settings</a></li>
+                </ul>
+            </div>
+            
+            <div>
+                <h4 class="footer-heading">Connect</h4>
+                <ul class="footer-links">
+                    <li><a href="#">Support</a></li>
+                    <li><a href="#">Contact</a></li>
+                    <li><a href="#">Privacy Policy</a></li>
+                    <li><a href="#">Terms of Service</a></li>
+                </ul>
+            </div>
+        </div>
+    </footer>
+
+    <script>
+        // Mobile Navigation Toggle
+        document.addEventListener('DOMContentLoaded', function() {
+            const navToggle = document.getElementById('navToggle');
+            const navLinks = document.querySelector('.nav-links');
+            
+            navToggle.addEventListener('click', function() {
+                navLinks.style.display = navLinks.style.display === 'flex' ? 'none' : 'flex';
+                const icon = this.querySelector('i');
+                icon.className = icon.className === 'fas fa-bars' ? 'fas fa-times' : 'fas fa-bars';
+            });
+            
+            // Theme Toggle
+            const themeToggle = document.getElementById('themeToggle');
+            const html = document.documentElement;
+            
+            const savedTheme = localStorage.getItem('theme');
+            if (savedTheme) {
+                html.setAttribute('data-theme', savedTheme);
+                updateThemeIcon(savedTheme);
+            }
+            
+            themeToggle.addEventListener('click', function() {
+                const currentTheme = html.getAttribute('data-theme') || 'light';
+                const newTheme = currentTheme === 'light' ? 'dark' : 'light';
+                
+                html.setAttribute('data-theme', newTheme);
+                localStorage.setItem('theme', newTheme);
+                updateThemeIcon(newTheme);
+            });
+            
+            function updateThemeIcon(theme) {
+                const icon = themeToggle.querySelector('i');
+                icon.className = theme === 'dark' ? 'fas fa-sun' : 'fas fa-moon';
+            }
+            
+            // Close mobile menu when clicking outside
+            document.addEventListener('click', function(e) {
+                if (!navToggle.contains(e.target) && !navLinks.contains(e.target)) {
+                    if (window.innerWidth <= 768) {
+                        navLinks.style.display = 'none';
+                        const icon = navToggle.querySelector('i');
+                        icon.className = 'fas fa-bars';
+                    }
+                }
+            });
+            
+            // Smooth scroll for anchor links
+            document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+                anchor.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    const target = document.querySelector(this.getAttribute('href'));
+                    if (target) {
+                        target.scrollIntoView({ behavior: 'smooth' });
+                    }
+                });
+            });
+        });
+    </script>
+</body>
+</html>

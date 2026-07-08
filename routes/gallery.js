@@ -288,7 +288,7 @@ router.get('/watch-later', requireAuth, (req, res) => {
   });
 });
 
-router.get('/media/:id', requireAuth, (req, res) => {
+router.get('/media/:id', requireAuth, async (req, res) => {
   const item = dbGet(`
     SELECT m.*, c.name as category_name, u.display_name as uploader_name
     FROM media m LEFT JOIN categories c ON m.category_id = c.id
@@ -308,6 +308,11 @@ router.get('/media/:id', requireAuth, (req, res) => {
     req.params.id, item.category_id, item.category_id);
   const next = dbGet(`SELECT id, title, thumbnail, type FROM media WHERE id > ? AND (? IS NULL OR category_id = ?) ORDER BY id ASC LIMIT 1`,
     req.params.id, item.category_id, item.category_id);
+
+  // Generate preview thumbnail for Google Drive videos on demand
+  if (item.drive_file_id && !item.thumbnail) {
+    await generateDrivePreviewThumbnail(item);
+  }
 
   res.render('gallery/view', {
     title: item.title, item, prev, next, liked,
@@ -514,75 +519,132 @@ router.get('/download/category/:id', requireAuth, (req, res) => {
 
 
 
-async function generateDriveVideoThumb(item) {
+async function generateDrivePreviewThumbnail(item) {
   if (!item.drive_file_id || item.thumbnail) return;
-  const thumbFilename = 'thumb_' + item.id + '.jpg';
+  
+  const thumbFilename = 'preview-thumb_' + item.id + '.jpg';
   const thumbPath = path.join(config.THUMBS_DIR, thumbFilename);
-  if (fs.existsSync(thumbPath)) { dbRun('UPDATE media SET thumbnail = ? WHERE id = ?', thumbFilename, item.id); return; }
-
-  const ranges = ['bytes=0-5242880', 'bytes=0-10485760'];
-
-  for (const range of ranges) {
-    const tmpPath = path.join(config.THUMBS_DIR, 'tmp_' + item.id + '_' + range.slice(-2) + '.mp4');
-
-    try {
-      await new Promise((resolve, reject) => {
-        const file = fs.createWriteStream(tmpPath);
-        let done = false;
-        const cleanup = (err) => {
-          if (done) return;
-          done = true;
-          try { file.close(); } catch (e) {}
-          if (err) reject(err); else resolve();
-        };
-
-        const url = `https://www.googleapis.com/drive/v3/files/${item.drive_file_id}?alt=media&key=${config.GOOGLE_DRIVE_API_KEY}`;
-        https.get(url, { headers: { 'User-Agent': 'StreetGallery/1.0', Range: range }, timeout: 30000 }, (driveRes) => {
-          if (driveRes.statusCode !== 200 && driveRes.statusCode !== 206) {
-            driveRes.resume();
-            try { fs.unlinkSync(tmpPath); } catch (e) {}
-            cleanup(new Error('Drive returned ' + driveRes.statusCode));
-            return;
-          }
-          driveRes.pipe(file);
-          driveRes.on('error', cleanup);
-          file.on('finish', cleanup);
-          file.on('error', cleanup);
-        }).on('error', cleanup).on('timeout', function() { this.destroy(); cleanup(new Error('Download timed out')); });
-      });
-
-      await new Promise((resolve, reject) => {
-        const proc = spawn(ffmpegPath, ['-ss', '0.01', '-i', tmpPath, '-vframes', '1', '-s', '400x300', '-q:v', '2', '-loglevel', 'error', '-y', thumbPath]);
-        let stderr = '';
-        proc.stderr.on('data', c => stderr += c);
-        let done = false;
-        const cleanup = (err) => {
-          if (done) return;
-          done = true;
-          try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch (e) {}
-          if (err) reject(err); else resolve();
-        };
-        proc.on('close', (code) => {
-          if (code === 0) cleanup();
-          else {
-            console.error('ffmpeg stderr for', item.title + ':', stderr);
-            cleanup(new Error('ffmpeg exited with code ' + code));
+  
+  if (fs.existsSync(thumbPath)) {
+    dbRun('UPDATE media SET thumbnail = ? WHERE id = ?', thumbFilename, item.id);
+    return;
+  }
+  
+  try {
+    const https = require('https');
+    const fs = require('fs');
+    const { exec } = require('child_process');
+    
+    console.log(`Generating preview thumbnail for: ${item.title} (ID: ${item.id})`);
+    
+    const previewUrl = `https://drive.google.com/file/d/${item.drive_file_id}/preview?screenshot=true`;
+    const thumbOutput = path.join(config.THUMBS_DIR, 'temp_' + item.id + '.jpg');
+    
+    const file = fs.createWriteStream(thumbOutput);
+    
+    https.get(previewUrl, { headers: { 'User-Agent': 'StreetGallery/1.0' }, timeout: 30000 }, (res) => {
+      if (res.statusCode === 200) {
+        res.pipe(file);
+        file.on('finish', () => {
+          if (fs.existsSync(thumbOutput)) {
+            const sharp = require('sharp');
+            sharp(thumbOutput)
+              .resize(400, 300, { fit: 'cover' })
+              .jpeg({ quality: 85 })
+              .toFile(thumbPath)
+              .then(() => {
+                fs.unlinkSync(thumbOutput);
+                dbRun('UPDATE media SET thumbnail = ? WHERE id = ?', thumbFilename, item.id);
+                console.log(`✓ Generated preview thumbnail for: ${item.title}`);
+              })
+              .catch(err => {
+                console.log(`✗ Thumbnail processing failed for ${item.title}: ${err.message}`);
+                if (fs.existsSync(thumbOutput)) fs.unlinkSync(thumbOutput);
+                generateDriveVideoPlaceholder(item);
+              });
+          } else {
+            console.log(`✗ Could not download preview image for ${item.title}`);
+            generateDriveVideoPlaceholder(item);
           }
         });
-        proc.on('error', cleanup);
-      });
-
-      dbRun('UPDATE media SET thumbnail = ? WHERE id = ?', thumbFilename, item.id);
-      return;
-    } catch (e) {
-      console.error('Thumbnail attempt failed for', item.title + ':', e.message);
-      try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch (e2) {}
-      if (!e.message.includes('254') || range === ranges[ranges.length - 1]) {
-        console.error('Thumbnail generation failed for', item.title + ':', e.message);
-        return;
+      } else {
+        console.log(`✗ Preview URL returned status ${res.statusCode} for ${item.title}`);
+        generateDriveVideoPlaceholder(item);
       }
-    }
+    }).on('error', (e) => {
+      console.log(`✗ Failed to fetch preview image for ${item.title}: ${e.message}`);
+      generateDriveVideoPlaceholder(item);
+    });
+    
+  } catch (e) {
+    console.log(`✗ Failed to generate preview thumbnail for ${item.title}: ${e.message}`);
+    generateDriveVideoPlaceholder(item);
   }
+}
+
+async function generateDriveVideoPlaceholder(item) {
+  const thumbFilename = 'placeholder_' + item.id + '.html';
+  const thumbPath = path.join(config.THUMBS_DIR, thumbFilename);
+  
+  const placeholderHTML = `<!DOCTYPE html>
+<html>
+<head>
+  <title>${item.title} - Drive Video</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 20px;
+      font-family: Arial, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100%;
+    }
+    .placeholder {
+      background: rgba(255,255,255,0.95);
+      border-radius: 12px;
+      padding: 30px;
+      text-align: center;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+      max-width: 400px;
+    }
+    .drive-icon {
+      font-size: 48px;
+      margin-bottom: 15px;
+    }
+    .play-btn {
+      background: #667eea;
+      color: white;
+      padding: 12px 24px;
+      border-radius: 8px;
+      text-decoration: none;
+      display: inline-block;
+      margin-top: 15px;
+      font-weight: bold;
+    }
+    h1 { color: #333; font-size: 18px; margin: 10px 0; }
+    p { color: #666; font-size: 14px; margin: 5px 0; }
+  </style>
+</head>
+<body>
+  <div class="placeholder">
+    <div class="drive-icon">📹</div>
+    <h1>${item.title}</h1>
+    <p>This video is hosted on Google Drive</p>
+    <p>Requires authentication to view</p>
+    <a href="https://drive.google.com/file/d/${item.drive_file_id}/preview" 
+       target="_blank" class="play-btn">
+      Watch on Google Drive
+    </a>
+  </div>
+</body>
+</html>`;
+  
+  fs.writeFileSync(thumbPath, placeholderHTML);
+  dbRun('UPDATE media SET thumbnail = ? WHERE id = ?', thumbFilename, item.id);
+  console.log(`✓ Generated placeholder thumbnail for: ${item.title}`);
 }
 
 router.get('/stream/:id', requireAuth, (req, res) => {
@@ -593,9 +655,11 @@ router.get('/stream/:id', requireAuth, (req, res) => {
 
   dbRun('UPDATE media SET views = views + 1 WHERE id = ?', req.params.id);
 
-  if (!item.thumbnail) generateDriveVideoThumb(item);
-
-  proxyDriveFile(item.drive_file_id, config.GOOGLE_DRIVE_API_KEY, req, res);
+  res.render('gallery/embed-video', { 
+    title: item.title, 
+    embedUrl: `https://drive.google.com/file/d/${item.drive_file_id}/preview`,
+    item: item
+  });
 });
 
 router.get('/download/:id', requireAuth, (req, res) => {
@@ -605,10 +669,12 @@ router.get('/download/:id', requireAuth, (req, res) => {
 
   if (!item.drive_file_id) return res.status(404).render('error', { title: 'Not Found', message: 'File not found' });
 
-  const filename = item.title + path.extname(item.filename);
-  res.set('Content-Disposition', `attachment; filename="${filename}"`);
-
-  proxyDriveFile(item.drive_file_id, config.GOOGLE_DRIVE_API_KEY, req, res);
+  // For now, redirect to embed page for download
+  res.render('gallery/embed-video', { 
+    title: item.title + ' - Download', 
+    embedUrl: `https://drive.google.com/file/d/${item.drive_file_id}/preview?${new Date().getTime()}`, // Add cache buster
+    item: item
+  });
 });
 
 module.exports = router;
