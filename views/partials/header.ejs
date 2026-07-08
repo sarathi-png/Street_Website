@@ -69,7 +69,8 @@
     </div>
   </nav>
 
-  <!-- Premium Hero Section -->
+  <!-- Premium Hero Section (hidden from admin) -->
+  <% if (typeof user === 'undefined' || !user || user.role !== 'admin') { %>
   <section class="hero">
     <div class="hero-content">
       <h1 class="hero-title">Our Family Moments</h1>
@@ -101,5 +102,6 @@
       </div>
     </div>
   </section>
+  <% } %>
 
   <main class="main">
