@@ -651,15 +651,54 @@ router.get('/stream/:id', requireAuth, (req, res) => {
   const item = dbGet('SELECT * FROM media WHERE id = ?', req.params.id);
   if (!item) return res.status(404).render('error', { title: 'Not Found', message: 'Media not found' });
 
-  if (!item.drive_file_id) return res.status(404).render('error', { title: 'Not Found', message: 'File not found' });
-
   dbRun('UPDATE media SET views = views + 1 WHERE id = ?', req.params.id);
 
-  res.render('gallery/embed-video', { 
-    title: item.title, 
-    embedUrl: `https://drive.google.com/file/d/${item.drive_file_id}/preview`,
-    item: item
-  });
+  if (item.drive_file_id) {
+    if (!config.GOOGLE_DRIVE_API_KEY) {
+      return res.redirect(`https://drive.google.com/file/d/${item.drive_file_id}/preview`);
+    }
+    return proxyDriveFile(item.drive_file_id, config.GOOGLE_DRIVE_API_KEY, req, res);
+  }
+
+  const filePath = path.join(config.UPLOADS_DIR, item.filename);
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).render('error', { title: 'Not Found', message: 'File not found on server' });
+  }
+
+  const stat = fs.statSync(filePath);
+  const fileSize = stat.size;
+  const mimeType = item.mime_type || 'application/octet-stream';
+
+  const range = req.headers.range;
+  if (range) {
+    const parts = range.replace(/bytes=/, '').split('-');
+    const start = parseInt(parts[0], 10);
+    const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+    const chunkSize = end - start + 1;
+
+    res.writeHead(206, {
+      'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+      'Accept-Ranges': 'bytes',
+      'Content-Length': chunkSize,
+      'Content-Type': mimeType,
+      'Cache-Control': 'public, max-age=86400'
+    });
+
+    const stream = fs.createReadStream(filePath, { start, end });
+    stream.pipe(res);
+    stream.on('error', () => { if (!res.headersSent) res.status(500).end(); });
+  } else {
+    res.writeHead(200, {
+      'Content-Length': fileSize,
+      'Content-Type': mimeType,
+      'Accept-Ranges': 'bytes',
+      'Cache-Control': 'public, max-age=86400'
+    });
+
+    const stream = fs.createReadStream(filePath);
+    stream.pipe(res);
+    stream.on('error', () => { if (!res.headersSent) res.status(500).end(); });
+  }
 });
 
 router.get('/download/:id', requireAuth, (req, res) => {
