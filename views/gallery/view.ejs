@@ -23,7 +23,13 @@
     </div>
 
     <div class="media-view-content">
-      <% if (item.type === 'photo') { %>
+      <% if (item.drive_file_id) { %>
+        <div class="drive-video-wrap">
+          <iframe src="https://drive.google.com/file/d/<%= item.drive_file_id %>/preview"
+                  allow="autoplay; encrypted-media; fullscreen" allowfullscreen frameborder="0"
+                  title="<%= item.title %>"></iframe>
+        </div>
+      <% } else if (item.type === 'photo') { %>
         <div class="media-view-img-wrapper">
           <img src="/uploads/<%= item.filename %>" alt="<%= item.title %>" class="media-view-img" id="lightboxTrigger" data-id="<%= item.id %>" data-filename="<%= item.filename %>">
         </div>
@@ -41,31 +47,10 @@
         </div>
       <% } else { %>
         <div class="media-view-video-wrapper">
-          <% if (item.video_codec && ['hevc','h265','vp9','av1'].includes(item.video_codec)) { %>
-            <div class="codec-warning-banner">
-              <i class="fas fa-exclamation-triangle"></i>
-              <span>This video uses <strong><%= item.video_codec.toUpperCase() %></strong> codec which may not play in all browsers. <a href="/download/<%= item.id %>" class="btn btn-sm" style="margin-left:8px">Download</a></span>
-            </div>
-          <% } %>
-          <video controls preload="metadata" class="media-view-video" id="videoPlayer" data-media-id="<%= item.id %>"
-            <% if (typeof watchPosition !== 'undefined' && watchPosition && watchPosition.position_seconds > 0) { %>data-resume="<%= watchPosition.position_seconds %>"<% } %>>
+          <video controls preload="metadata" class="media-view-video" id="videoPlayer" data-media-id="<%= item.id %>">
             <source src="/stream/<%= item.id %>" type="<%= item.mime_type || 'video/mp4' %>">
             Your browser doesn't support this video format.
           </video>
-          <div class="video-error-overlay hidden" id="videoError">
-            <i class="fas fa-exclamation-triangle"></i>
-            <p><strong>Unable to load video</strong></p>
-            <p class="video-error-detail">If this is a Drive video, ensure the file is shared as <strong>"Anyone with the link"</strong> on Google Drive.</p>
-            <p class="video-error-rate hidden" id="videoErrorRate"><i class="fas fa-clock"></i> Drive API rate limit reached. Wait a few minutes and try again.</p>
-            <button class="btn btn-sm btn-secondary" onclick="document.getElementById('videoError').classList.add('hidden');document.getElementById('videoPlayer').load()">Retry</button>
-          </div>
-          <% if (typeof watchPosition !== 'undefined' && watchPosition && watchPosition.position_seconds > 0) { %>
-            <div class="resume-notice" id="resumeNotice">
-              <span>Resume from <%= Math.floor(watchPosition.position_seconds / 60) %>m <%= Math.floor(watchPosition.position_seconds % 60) %>s</span>
-              <button class="btn btn-sm btn-primary" onclick="document.getElementById('videoPlayer').currentTime=<%= watchPosition.position_seconds %>;document.getElementById('resumeNotice').classList.add('hidden')">Resume</button>
-              <button class="btn btn-sm btn-secondary" onclick="document.getElementById('resumeNotice').classList.add('hidden')">Start over</button>
-            </div>
-          <% } %>
         </div>
       <% } %>
     </div>

@@ -309,11 +309,6 @@ router.get('/media/:id', requireAuth, async (req, res) => {
   const next = dbGet(`SELECT id, title, thumbnail, type FROM media WHERE id > ? AND (? IS NULL OR category_id = ?) ORDER BY id ASC LIMIT 1`,
     req.params.id, item.category_id, item.category_id);
 
-  // Generate preview thumbnail for Google Drive videos on demand
-  if (item.drive_file_id && !item.thumbnail) {
-    await generateDrivePreviewThumbnail(item);
-  }
-
   res.render('gallery/view', {
     title: item.title, item, prev, next, liked,
     isFavorite: !!isFav, tags, watchPosition: watchPos
@@ -519,133 +514,6 @@ router.get('/download/category/:id', requireAuth, (req, res) => {
 
 
 
-async function generateDrivePreviewThumbnail(item) {
-  if (!item.drive_file_id || item.thumbnail) return;
-  
-  const thumbFilename = 'preview-thumb_' + item.id + '.jpg';
-  const thumbPath = path.join(config.THUMBS_DIR, thumbFilename);
-  
-  if (fs.existsSync(thumbPath)) {
-    dbRun('UPDATE media SET thumbnail = ? WHERE id = ?', thumbFilename, item.id);
-    return;
-  }
-  
-  try {
-    const https = require('https');
-    const fs = require('fs');
-    const { exec } = require('child_process');
-    
-    console.log(`Generating preview thumbnail for: ${item.title} (ID: ${item.id})`);
-    
-    const previewUrl = `https://drive.google.com/file/d/${item.drive_file_id}/preview?screenshot=true`;
-    const thumbOutput = path.join(config.THUMBS_DIR, 'temp_' + item.id + '.jpg');
-    
-    const file = fs.createWriteStream(thumbOutput);
-    
-    https.get(previewUrl, { headers: { 'User-Agent': 'StreetGallery/1.0' }, timeout: 30000 }, (res) => {
-      if (res.statusCode === 200) {
-        res.pipe(file);
-        file.on('finish', () => {
-          if (fs.existsSync(thumbOutput)) {
-            const sharp = require('sharp');
-            sharp(thumbOutput)
-              .resize(400, 300, { fit: 'cover' })
-              .jpeg({ quality: 85 })
-              .toFile(thumbPath)
-              .then(() => {
-                fs.unlinkSync(thumbOutput);
-                dbRun('UPDATE media SET thumbnail = ? WHERE id = ?', thumbFilename, item.id);
-                console.log(`✓ Generated preview thumbnail for: ${item.title}`);
-              })
-              .catch(err => {
-                console.log(`✗ Thumbnail processing failed for ${item.title}: ${err.message}`);
-                if (fs.existsSync(thumbOutput)) fs.unlinkSync(thumbOutput);
-                generateDriveVideoPlaceholder(item);
-              });
-          } else {
-            console.log(`✗ Could not download preview image for ${item.title}`);
-            generateDriveVideoPlaceholder(item);
-          }
-        });
-      } else {
-        console.log(`✗ Preview URL returned status ${res.statusCode} for ${item.title}`);
-        generateDriveVideoPlaceholder(item);
-      }
-    }).on('error', (e) => {
-      console.log(`✗ Failed to fetch preview image for ${item.title}: ${e.message}`);
-      generateDriveVideoPlaceholder(item);
-    });
-    
-  } catch (e) {
-    console.log(`✗ Failed to generate preview thumbnail for ${item.title}: ${e.message}`);
-    generateDriveVideoPlaceholder(item);
-  }
-}
-
-async function generateDriveVideoPlaceholder(item) {
-  const thumbFilename = 'placeholder_' + item.id + '.html';
-  const thumbPath = path.join(config.THUMBS_DIR, thumbFilename);
-  
-  const placeholderHTML = `<!DOCTYPE html>
-<html>
-<head>
-  <title>${item.title} - Drive Video</title>
-  <style>
-    body {
-      margin: 0;
-      padding: 20px;
-      font-family: Arial, sans-serif;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      min-height: 100%;
-    }
-    .placeholder {
-      background: rgba(255,255,255,0.95);
-      border-radius: 12px;
-      padding: 30px;
-      text-align: center;
-      box-shadow: 0 8px 32px rgba(0,0,0,0.1);
-      max-width: 400px;
-    }
-    .drive-icon {
-      font-size: 48px;
-      margin-bottom: 15px;
-    }
-    .play-btn {
-      background: #667eea;
-      color: white;
-      padding: 12px 24px;
-      border-radius: 8px;
-      text-decoration: none;
-      display: inline-block;
-      margin-top: 15px;
-      font-weight: bold;
-    }
-    h1 { color: #333; font-size: 18px; margin: 10px 0; }
-    p { color: #666; font-size: 14px; margin: 5px 0; }
-  </style>
-</head>
-<body>
-  <div class="placeholder">
-    <div class="drive-icon">📹</div>
-    <h1>${item.title}</h1>
-    <p>This video is hosted on Google Drive</p>
-    <p>Requires authentication to view</p>
-    <a href="https://drive.google.com/file/d/${item.drive_file_id}/preview" 
-       target="_blank" class="play-btn">
-      Watch on Google Drive
-    </a>
-  </div>
-</body>
-</html>`;
-  
-  fs.writeFileSync(thumbPath, placeholderHTML);
-  dbRun('UPDATE media SET thumbnail = ? WHERE id = ?', thumbFilename, item.id);
-  console.log(`✓ Generated placeholder thumbnail for: ${item.title}`);
-}
 
 router.get('/stream/:id', requireAuth, (req, res) => {
   const item = dbGet('SELECT * FROM media WHERE id = ?', req.params.id);
@@ -654,10 +522,7 @@ router.get('/stream/:id', requireAuth, (req, res) => {
   dbRun('UPDATE media SET views = views + 1 WHERE id = ?', req.params.id);
 
   if (item.drive_file_id) {
-    if (!config.GOOGLE_DRIVE_API_KEY) {
-      return res.redirect(`https://drive.google.com/file/d/${item.drive_file_id}/preview`);
-    }
-    return proxyDriveFile(item.drive_file_id, config.GOOGLE_DRIVE_API_KEY, req, res);
+    return res.redirect(`https://drive.google.com/file/d/${item.drive_file_id}/preview`);
   }
 
   const filePath = path.join(config.UPLOADS_DIR, item.filename);

@@ -600,6 +600,22 @@ textarea { resize: vertical; min-height: 80px; }
 
 .media-view-video-wrapper { background: #000; aspect-ratio: 16/9; }
 .media-view-video { width: 100%; height: 100%; display: block; outline: none; }
+
+.drive-video-wrap {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: #000;
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.drive-video-wrap iframe {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
 .audio-player-wrapper { background: var(--clr-surface); border-radius: var(--radius); padding: 40px; display: flex; flex-direction: column; align-items: center; gap: 24px; border: 1px solid var(--clr-border); }
 .audio-art { width: 120px; height: 120px; border-radius: 50%; background: var(--clr-primary-light); display: flex; align-items: center; justify-content: center; }
 .media-view-audio { width: 100%; max-width: 500px; }

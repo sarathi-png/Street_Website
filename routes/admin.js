@@ -166,53 +166,23 @@ function downloadDriveFile(fileId, destPath, apiKey) {
 }
 
 async function importDriveFile(fileId, title, categoryId, userId, driveFileInfo, apiKey) {
+  const driveName = driveFileInfo && driveFileInfo.name ? driveFileInfo.name : 'Imported';
   const origExt = driveFileInfo && driveFileInfo.fileExtension ? '.' + driveFileInfo.fileExtension
     : (driveFileInfo && driveFileInfo.name ? path.extname(driveFileInfo.name) : '');
-  const ext = origExt || '.jpg';
-  const finalFilename = uuidv4() + ext;
-  const driveName = driveFileInfo ? driveFileInfo.name : 'Imported';
-  const displayTitle = title || driveName.replace(ext, '');
+  const ext = origExt || '';
   const mimeType = driveFileInfo && driveFileInfo.mimeType ? driveFileInfo.mimeType : (ext === '.mp4' ? 'video/mp4' : 'image/jpeg');
   const isVideo = mimeType.startsWith('video/');
   const isAudio = mimeType.startsWith('audio/');
+  const type = isVideo ? 'video' : (isAudio ? 'audio' : 'photo');
+  const displayTitle = title || driveName.replace(ext, '');
 
-  if (isVideo || isAudio) {
-    dbRun(`INSERT INTO media (title, type, filename, thumbnail, file_size, mime_type, drive_file_id, category_id, uploaded_by, video_codec)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      displayTitle, isVideo ? 'video' : 'audio', finalFilename, null, parseInt(driveFileInfo && driveFileInfo.size) || 0,
-      mimeType, fileId, categoryId || null, userId, null);
-  } else {
-    let thumbFilename = null;
-    let stat;
-    const tempPath = path.join(UPLOADS_DIR, uuidv4());
-    try {
-      await downloadDriveFile(fileId, tempPath, apiKey);
-      stat = fs.statSync(tempPath);
-      const finalPath = path.join(UPLOADS_DIR, finalFilename);
-      fs.renameSync(tempPath, finalPath);
-      thumbFilename = 'thumb_' + finalFilename.replace(ext, '.jpg');
-      try {
-        await sharp(finalPath).resize(400, 300, { fit: 'cover' }).jpeg({ quality: 80 })
-          .toFile(path.join(THUMBS_DIR, thumbFilename));
-      } catch (e) {
-        console.error('Photo thumbnail generation failed:', e.message);
-        thumbFilename = null;
-      }
-    } catch (e) {
-      console.error('Photo download failed:', e.message);
-      try { if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath); } catch (e2) {}
-    }
-
-    if (stat) {
-      dbRun(`INSERT INTO media (title, type, filename, thumbnail, file_size, mime_type, drive_file_id, category_id, uploaded_by)
-        VALUES (?, 'photo', ?, ?, ?, ?, ?, ?, ?)`,
-        displayTitle, finalFilename, thumbFilename, stat.size, mimeType, fileId, categoryId || null, userId);
-    } else {
-      dbRun(`INSERT INTO media (title, type, filename, thumbnail, file_size, mime_type, drive_file_id, category_id, uploaded_by)
-        VALUES (?, 'photo', ?, ?, ?, ?, ?, ?, ?)`,
-        displayTitle, finalFilename, null, 0, mimeType, fileId, categoryId || null, userId);
-    }
-  }
+  // Drive-first: never download the file or generate thumbnails on the server.
+  // Playback uses Google's /preview iframe; thumbnails use the public
+  // https://drive.google.com/thumbnail?id=<id> URL (no API key required).
+  dbRun(`INSERT INTO media (title, type, filename, thumbnail, file_size, mime_type, drive_file_id, category_id, uploaded_by)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    displayTitle, type, fileId, null, parseInt(driveFileInfo && driveFileInfo.size) || 0,
+    mimeType, fileId, categoryId || null, userId);
 }
 
 function extractDriveId(url) {
@@ -612,195 +582,22 @@ router.post('/users/reset-password/:id', requireAdmin, (req, res) => {
 const thumbJobs = {};
 let thumbJobCounter = 0;
 
-async function generateDriveVideoThumbnail(item) {
-  const thumbFilename = 'thumb_' + item.id + '.jpg';
-  const thumbPath = path.join(config.THUMBS_DIR, thumbFilename);
-  if (fs.existsSync(thumbPath)) {
-    dbRun('UPDATE media SET thumbnail = ? WHERE id = ?', thumbFilename, item.id);
-    return true;
-  }
 
-  // Try API key approach first (byte ranges)
-  if (config.GOOGLE_DRIVE_API_KEY) {
-    const url = `https://www.googleapis.com/drive/v3/files/${item.drive_file_id}?alt=media&key=${config.GOOGLE_DRIVE_API_KEY}`;
-    const ranges = ['bytes=0-5242880', 'bytes=0-10485760'];
-
-    for (const range of ranges) {
-      const tmpPath = path.join(config.THUMBS_DIR, 'tmp_thumb_' + item.id + '_' + range.slice(-2) + '.mp4');
-
-      try {
-        const contentType = await new Promise((resolve, reject) => {
-          const file = fs.createWriteStream(tmpPath);
-          let done = false;
-          const cleanup = (err, ct) => {
-            if (done) return;
-            done = true;
-            try { file.close(); } catch (e) {}
-            try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch (e) {}
-            if (err) reject(err); else resolve(ct);
-          };
-
-          https.get(url, { headers: { 'User-Agent': 'StreetGallery/1.0', Range: range }, timeout: 30000 }, (driveRes) => {
-            if (driveRes.statusCode !== 200 && driveRes.statusCode !== 206) {
-              driveRes.resume();
-              cleanup(new Error('Drive returned ' + driveRes.statusCode));
-              return;
-            }
-            const ct = driveRes.headers['content-type'] || '';
-            if (!ct.includes('video') && !ct.includes('octet-stream') && !ct.includes('binary')) {
-              driveRes.resume();
-              cleanup(new Error('Not a video response (Content-Type: ' + ct + ')'));
-              return;
-            }
-            driveRes.pipe(file);
-            driveRes.on('error', cleanup);
-            file.on('finish', () => cleanup(null, ct));
-            file.on('error', cleanup);
-          }).on('error', cleanup).on('timeout', function() { this.destroy(); cleanup(new Error('Download timed out')); });
-        });
-
-        await new Promise((resolve, reject) => {
-          const proc = spawn(ffmpegPath, ['-ss', '0.01', '-i', tmpPath, '-vframes', '1', '-s', '400x300', '-q:v', '2', '-loglevel', 'error', '-y', thumbPath]);
-          let stderr = '';
-          proc.stderr.on('data', c => stderr += c);
-          let done = false;
-          const cleanup = (err) => {
-            if (done) return;
-            done = true;
-            try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch (e) {}
-            if (err) reject(err); else resolve();
-          };
-          proc.on('close', (code) => {
-            if (code === 0) cleanup();
-            else {
-              console.error('ffmpeg stderr for', item.title + ':', stderr);
-              cleanup(new Error('ffmpeg exited with code ' + code));
-            }
-          });
-          proc.on('error', cleanup);
-        });
-
-        dbRun('UPDATE media SET thumbnail = ? WHERE id = ?', thumbFilename, item.id);
-        return true;
-      } catch (e) {
-        console.error('Thumbnail attempt failed for', item.title + ':', e.message);
-        try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch (e2) {}
-        if (!e.message.includes('254') || range === ranges[ranges.length - 1]) {
-          // On last attempt failure, fall through to public URL fallback
-          if (range === ranges[ranges.length - 1]) break;
-          throw e;
-        }
-      }
-    }
-  }
-
-  // Fallback: try public Drive URL download
-  try {
-    const publicUrl = `https://drive.google.com/uc?export=download&id=${item.drive_file_id}&confirm=t`;
-    const tmpPath = path.join(config.THUMBS_DIR, 'tmp_thumb_' + item.id + '_public.mp4');
-
-    await new Promise((resolve, reject) => {
-      const file = fs.createWriteStream(tmpPath);
-      let done = false;
-      const cleanup = (err) => {
-        if (done) return;
-        done = true;
-        try { file.close(); } catch (e) {}
-        if (err) reject(err); else resolve();
-      };
-
-      https.get(publicUrl, { headers: { 'User-Agent': 'Mozilla/5.0' }, timeout: 30000 }, (driveRes) => {
-        if (driveRes.statusCode !== 200) {
-          driveRes.resume();
-          cleanup(new Error('Public URL returned ' + driveRes.statusCode));
-          return;
-        }
-        driveRes.pipe(file);
-        driveRes.on('error', cleanup);
-        file.on('finish', cleanup);
-        file.on('error', cleanup);
-      }).on('error', cleanup).on('timeout', function() { this.destroy(); cleanup(new Error('Download timed out')); });
-    });
-
-    await new Promise((resolve, reject) => {
-      const proc = spawn(ffmpegPath, ['-ss', '0.01', '-i', tmpPath, '-vframes', '1', '-s', '400x300', '-q:v', '2', '-loglevel', 'error', '-y', thumbPath]);
-      let stderr = '';
-      proc.stderr.on('data', c => stderr += c);
-      let done = false;
-      const cleanup = (err) => {
-        if (done) return;
-        done = true;
-        try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch (e) {}
-        if (err) reject(err); else resolve();
-      };
-      proc.on('close', (code) => {
-        if (code === 0) cleanup();
-        else {
-          console.error('ffmpeg stderr for', item.title + ':', stderr);
-          cleanup(new Error('ffmpeg exited with code ' + code));
-        }
-      });
-      proc.on('error', cleanup);
-    });
-
-    dbRun('UPDATE media SET thumbnail = ? WHERE id = ?', thumbFilename, item.id);
-    return true;
-  } catch (e) {
-    console.error('Public URL thumb fallback failed for', item.title + ':', e.message);
-    try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch (e2) {}
-  }
-
-  // Final fallback: create placeholder HTML thumbnail
-  console.log('Using placeholder thumbnail for:', item.title);
-  const placeholderFilename = 'placeholder_' + item.id + '.html';
-  const placeholderPath = path.join(config.THUMBS_DIR, placeholderFilename);
-  const placeholderHTML = `<!DOCTYPE html>
-<html><head><title>${item.title} - Drive Video</title><style>
-body{margin:0;padding:20px;font-family:Arial,sans-serif;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);display:flex;align-items:center;justify-content:center;min-height:100%}
-.card{background:rgba(255,255,255,0.95);border-radius:12px;padding:30px;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,0.1);max-width:400px}
-.icon{font-size:48px;margin-bottom:15px}
-.btn{background:#667eea;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;display:inline-block;margin-top:15px;font-weight:bold}
-h1{color:#333;font-size:18px;margin:10px 0}p{color:#666;font-size:14px;margin:5px 0}
-</style></head><body><div class="card"><div class="icon">📹</div>
-<h1>${item.title}</h1><p>Hosted on Google Drive</p>
-<a href="https://drive.google.com/file/d/${item.drive_file_id}/preview" target="_blank" class="btn">Watch on Google Drive</a>
-</div></body></html>`;
-  fs.writeFileSync(placeholderPath, placeholderHTML);
-  dbRun('UPDATE media SET thumbnail = ? WHERE id = ?', placeholderFilename, item.id);
-  return false;
-}
 
 router.get('/media/missing-thumbnails-count', requireAdmin, (req, res) => {
-  const count = dbGet("SELECT COUNT(*) as c FROM media WHERE type = 'video' AND thumbnail IS NULL AND drive_file_id IS NOT NULL").c;
+  // Drive thumbnails render on-demand from Google's public thumbnail URL,
+  // so only count locally-stored media that genuinely lack a thumbnail.
+  const count = dbGet("SELECT COUNT(*) as c FROM media WHERE type = 'video' AND thumbnail IS NULL AND drive_file_id IS NULL").c;
   res.json({ count });
 });
 
 router.post('/media/generate-drive-thumbnails', requireAdmin, async (req, res) => {
-  const videos = dbAll("SELECT * FROM media WHERE type = 'video' AND thumbnail IS NULL AND drive_file_id IS NOT NULL");
-  if (!videos.length) return res.json({ jobId: null, message: 'No videos need thumbnails' });
-
-  const jobId = ++thumbJobCounter;
-  thumbJobs[jobId] = { total: videos.length, current: 0, errors: 0, lastError: '', done: false, message: '' };
-
-  setImmediate(async () => {
-    for (const item of videos) {
-      try {
-        await generateDriveVideoThumbnail(item);
-        thumbJobs[jobId].current++;
-      } catch (e) {
-        console.error('Thumbnail failed for media ' + item.id + ':', e.message);
-        thumbJobs[jobId].errors++;
-        thumbJobs[jobId].lastError = item.title + ': ' + e.message;
-        thumbJobs[jobId].current++;
-      }
-    }
-    const ok = thumbJobs[jobId].current - thumbJobs[jobId].errors;
-    thumbJobs[jobId].done = true;
-    thumbJobs[jobId].message = `Generated ${ok} of ${thumbJobs[jobId].total} thumbnails`;
-    setTimeout(() => { delete thumbJobs[jobId]; }, 120000);
-  });
-
-  res.json({ jobId });
+  // Drive videos don't need server-side thumbnail generation: the gallery
+  // grid uses https://drive.google.com/thumbnail?id=<id>&sz=w400 directly
+  // (no API key, no ffmpeg). This endpoint is kept for compatibility and
+  // simply reports that no work is required.
+  const count = dbGet("SELECT COUNT(*) as c FROM media WHERE type = 'video' AND thumbnail IS NULL AND drive_file_id IS NOT NULL").c;
+  res.json({ jobId: null, message: `Drive thumbnails render on-demand from Google (${count} items). No generation needed.` });
 });
 
 router.get('/media/thumbnail-progress/:jobId', requireAdmin, (req, res) => {
